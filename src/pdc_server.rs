@@ -4,8 +4,8 @@
 //use rand::rngs::StdRng;
 //use rand::{Rng, SeedableRng};
 //use serde::de::Error;
+use crate::frames::calculate_crc;
 use std::error::Error;
-
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::{self, Duration};
@@ -65,11 +65,40 @@ fn read_test_file(file_name: &str) -> Result<Vec<u8>, Box<dyn Error + Send + Syn
 
     Ok(bytes)
 }
+fn update_frame_timestamp(frame: &mut Vec<u8>) {
+    // Get current time
+    let now = std::time::SystemTime::now();
+    let duration = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or(std::time::Duration::from_secs(0));
+
+    // Extract seconds and fractional seconds
+    let secs = duration.as_secs() as u32;
+    let nanos = duration.subsec_nanos();
+    let fracsec = (nanos as f64 / 1_000_000_000.0 * 16777216.0) as u32; // Convert to 24-bit fraction
+
+    // Update SOC (seconds) - bytes 6-9
+    frame[6..10].copy_from_slice(&secs.to_be_bytes());
+
+    // Update FRACSEC - bytes 10-13
+    frame[10..14].copy_from_slice(&fracsec.to_be_bytes());
+
+    // Calculate and update CRC
+    let crc = calculate_crc(&frame[..frame.len() - 2]);
+    let frame_len = frame.len();
+    frame[frame_len - 2..].copy_from_slice(&crc.to_be_bytes());
+}
 
 async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) -> io::Result<()> {
     println!("Handling client");
     let mut is_streaming = false;
     let stream_interval = Duration::from_secs_f64(1.0 / config.data_rate);
+
+    // Read test files once at the start
+    let config_frame = read_test_file("config_message.bin")
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+    let mut data_frame = read_test_file("data_message.bin")
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
     // Buffer for reading commands
     let mut buf = vec![0u8; 1024];
@@ -128,11 +157,13 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
                 }
             }
             _ = time::sleep(stream_interval), if is_streaming => {
-                if let Ok(data_frame) = read_test_file("data_message.bin") {
-                    if let Err(e) = socket.write_all(&data_frame).await {
-                        println!("Error sending data frame: {}", e);
-                        break;
-                    }
+                // Update timestamp and CRC in data frame
+                let mut frame_to_send = data_frame.clone();
+                update_frame_timestamp(&mut frame_to_send);
+
+                if let Err(e) = socket.write_all(&frame_to_send).await {
+                    println!("Error sending data frame: {}", e);
+                    break;
                 }
             }
         }
