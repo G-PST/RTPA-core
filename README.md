@@ -2,7 +2,8 @@
 > [!CAUTION]
 > This software is experimental and subject to change.
 
-## How to run
+
+## Getting started
 
 Clone the entire repo
 
@@ -10,39 +11,67 @@ Clone the entire repo
 git clone https://github.com/G-PST/pmu-data-analytics.git
 ```
 
-Running the CLI:
+Running the CLI using
+[cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html):
 
 ```console
 cargo run --help
 ```
 
+## How to ...
 
-Reading PMU data from Python
+### ... start the Mock PDC server
+
+```console
+cargo run mock-pdc
+```
+
+### ... start the Mock PDC server in a non-default IP/PORT
+
+```console
+cargo run -- mock-pdc --ip localhost --port 8080
+```
+
+### ... start the PMU server
+
+```console
+cargo run server
+```
+
+### ... start the PMU server and connect to a PDC
+
+Assuming that the IP of the PDC server is `160.49.88.18` and the port enable is
+`3030`
+
+```console
+cargo run -- server --pdc-ip 160.49.88.18 --port 3030
+```
+
+### ... change the frequency of the PDC server
+
+```console
+cargo run -- server --pdc-ip localhost --port 8080
+```
+
+### ... change the HTTP server port of the application
+
+```console
+cargo run -- server --http-port 3030
+```
+
+### ... read the data from the PMU server in Python
+
+While the server is running you can use Python to access the memory buffer using
+pandas:
 
 ```python
 import io
 import pandas as pd
 import requests
 
-url = "http://127.0.0.1:8080/data"
+PORT = 8080  # Port where the Server was bind
+url = f"http://127.0.0.1:{PORT}/data"
 s = requests.get(url, timeout=10)
-df = pd.read_feather(io.BytesIO(requests.get(url, timeout=10))
+df = pd.read_feather(io.BytesIO(requests.get(url, timeout=10).content))
 df.head()
 ```
-
-
-Todo:
-
-- [ ] Add handler for broken pipe,
-- [ ] Add BSD3 licence,
-- [ ] Improve documentation to add examples,
-- [ ] Create a more robust mock PDC server with multiple PMU's,
-- [ ] Additional HTTP endpoints:
-    - [ ] PDC connection status,
-    - [ ] Additional HTTP endpoints to get the configuration and header as JSON,
-    - [ ] Filter to get the last X elements from the buffer (optional),
-- [ ] Add package to cargo,
-- [ ] Add more logging on the server to see HTTP request coming in,
-- [ ] Add retry logic for server connection to PDC,
-- [ ] Support for the IEEE C37.118 2024 or version 3.0,
-- [ ] Add support for `ConfigurationFrame3`,
