@@ -1,4 +1,6 @@
 #![allow(unused)]
+use serde::ser::{SerializeStruct, Serializer};
+use serde::{self, Deserialize, Serialize};
 use std::collections::HashMap;
 // GOAL: Turn Sequence of Bytes in TCP packets into IEEE C37.118.2 formatted structs.
 // Define structures common to all frames
@@ -24,7 +26,7 @@ pub fn calculate_crc(buffer: &[u8]) -> u16 {
     crc
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PrefixFrame2011 {
     pub sync: u16, // Leading byte = AA hex,
     // second byte: Frame type and version
@@ -74,7 +76,7 @@ impl PrefixFrame2011 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct HeaderFrame2011 {
     pub prefix: PrefixFrame2011,
     pub data_source: [u8; 32], // Data source identifier 32 byte ASCII
@@ -271,7 +273,7 @@ pub struct ChannelInfo {
     pub size: usize,   // Size in bytes
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ConfigurationFrame1and2_2011 {
     pub prefix: PrefixFrame2011,
     pub time_base: u32, // Resolution of
@@ -483,4 +485,64 @@ impl PMUConfigurationFrame2011 {
 
         channel_names
     }
+}
+
+// Implement custom serialization
+impl Serialize for PMUConfigurationFrame2011 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Calculate number of fields we'll serialize
+        let num_fields = 11; // Adjust based on number of fields we're serializing
+
+        let mut state = serializer.serialize_struct("PMUConfigurationFrame2011", num_fields)?;
+
+        // Convert station name from [u8; 16] to String, trimming nulls and whitespace
+        let stn_str = String::from_utf8_lossy(&self.stn)
+            .trim_end_matches(char::from(0))
+            .trim()
+            .to_string();
+
+        state.serialize_field("stn", &stn_str)?;
+        state.serialize_field("idcode", &self.idcode)?;
+        state.serialize_field("format", &self.format)?;
+        state.serialize_field("phnmr", &self.phnmr)?;
+        state.serialize_field("annmr", &self.annmr)?;
+        state.serialize_field("dgnmr", &self.dgnmr)?;
+
+        // Use get_column_names() instead of raw chnam
+        let channel_names = self.get_column_names();
+        state.serialize_field("channels", &channel_names)?;
+
+        // You might want to add more meaningful representations of these units
+        state.serialize_field("phunit", &self.phunit)?;
+        state.serialize_field("anunit", &self.anunit)?;
+        state.serialize_field("digunit", &self.digunit)?;
+        state.serialize_field("fnom", &self.fnom)?;
+        state.serialize_field("cfgcnt", &self.cfgcnt)?;
+
+        // Add some computed properties that might be useful
+        state.serialize_field("is_polar", &self.is_phasor_polar())?;
+
+        // Add format flags as readable booleans
+        let format_flags = FormatFlags {
+            freq_dfreq_float: self.format & 0x0008 != 0,
+            analog_float: self.format & 0x0004 != 0,
+            phasor_float: self.format & 0x0002 != 0,
+            phasor_polar: self.format & 0x0001 != 0,
+        };
+        state.serialize_field("format_flags", &format_flags)?;
+
+        state.end()
+    }
+}
+
+// Helper structure for format flags
+#[derive(Serialize)]
+struct FormatFlags {
+    freq_dfreq_float: bool,
+    analog_float: bool,
+    phasor_float: bool,
+    phasor_polar: bool,
 }

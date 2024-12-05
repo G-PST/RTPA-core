@@ -12,10 +12,13 @@ use crate::{
 };
 use bytes::BytesMut;
 use std::collections::VecDeque;
+use std::error::Error;
 use std::io;
 use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc; // For efficient byte management
+use tracing::{debug, error, info, warn};
 
 // Define an enum to represent different buffer types
 enum BufferType {
@@ -30,7 +33,7 @@ pub enum ControlMessage {
 }
 
 pub struct PDCClient {
-    stream: tokio::net::TcpStream,
+    stream: TcpStream,
     //allocate 30 kB to the stack to serve as a ring buffer.
     buffer: BufferType,
     duration: Duration,
@@ -52,17 +55,20 @@ impl PDCClient {
         port: u16,
         idcode: u16,
         duration: Duration,
-    ) -> Result<(Self, mpsc::Sender<ControlMessage>, mpsc::Receiver<Vec<u8>>), std::io::Error> {
-        println!("Attempting to connect to {}:{}", host, port);
+    ) -> Result<
+        (Self, mpsc::Sender<ControlMessage>, mpsc::Receiver<Vec<u8>>),
+        Box<dyn Error + Send + Sync>,
+    > {
+        info!("Attempting to connect to {}:{}", host, port);
         let addr = format!("{}:{}", host, port);
 
         //let stream = tokio::net::TcpStream::connect(&addr).await?;
         let stream = tokio::net::TcpStream::connect(&addr).await.map_err(|e| {
-            println!("Failed to connect to PDC server: {}", e);
+            error!("Failed to connect to PDC server: {}", e);
             io::Error::new(io::ErrorKind::ConnectionRefused, e)
         })?;
 
-        println!("Successfully connected to PDC server");
+        info!("Successfully connected to PDC server");
         let (control_tx, control_rx) = mpsc::channel(32);
         let (data_tx, data_rx) = mpsc::channel(1024 * 30);
 
@@ -85,13 +91,29 @@ impl PDCClient {
         };
 
         // Get initial configuration
-        println!("Getting configuration");
+        info!("Getting configuration");
         let config = client.get_config_frame().await.unwrap();
         client.config = Some(config);
-        println!("Got Configuration: {} PMUs", 1);
+        info!("Got Configuration: {} PMUs", 1);
         client.initialize_buffer()?;
 
         Ok((client, control_tx, data_rx))
+    }
+    // Add a reconnect method that only updates the TCP connection
+    pub async fn reconnect(
+        &mut self,
+        host: &str,
+        port: u16,
+        idcode: u16,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Reconnect TCP stream
+        self.stream = TcpStream::connect((host, port)).await?;
+
+        // Reinitialize connection
+        self.start_stream();
+        //self.initialize_connection(idcode).await?;
+
+        Ok(())
     }
 
     fn calculate_frame_size(&self) -> usize {
@@ -140,12 +162,12 @@ impl PDCClient {
             // Switch to heap buffer if required size is too large
             if self.max_buffer_size > 30 * 1024 {
                 self.buffer = BufferType::Heap(VecDeque::with_capacity(total_frames));
-                println!(
+                info!(
                     "Using heap buffer with capacity for {} frames",
                     total_frames
                 );
             } else {
-                println!("Using stack buffer");
+                info!("Using stack buffer");
             }
         }
         Ok(())
@@ -155,16 +177,16 @@ impl PDCClient {
     }
 
     pub async fn get_config_frame(&mut self) -> io::Result<ConfigurationFrame1and2_2011> {
-        println!("Requesting configuration frame...");
+        info!("Requesting configuration frame...");
 
         // Create command frame for config request
         let cmd_frame = CommandFrame2011::new_send_config_frame1(self.idcode);
         let cmd_bytes = cmd_frame.to_hex();
 
         // Send command
-        println!("Sending config request command...");
+        info!("Sending config request command...");
         self.stream.write_all(&cmd_bytes).await?;
-        println!("Config request command sent");
+        info!("Config request command sent");
 
         // Read response
         // First read common header (14 bytes) to get frame size
@@ -175,7 +197,7 @@ impl PDCClient {
             // Read the rest of the frame
             let remaining_size = prefix.framesize as usize - 14;
 
-            println!("Reading rest of frame bytes:{}", remaining_size);
+            info!("Reading rest of frame bytes:{}", remaining_size);
             let mut config_buf = BytesMut::with_capacity(remaining_size);
 
             self.stream.try_read_buf(&mut config_buf);
@@ -191,7 +213,7 @@ impl PDCClient {
             ]);
 
             if calculated_crc != frame_crc {
-                println!(
+                warn!(
                     "CRC mismatch: calculated={:04x}, received={:04x}",
                     calculated_crc, frame_crc
                 );
@@ -204,11 +226,11 @@ impl PDCClient {
             // Parse configuration frame
             match parse_config_frame_1and2(&complete_frame) {
                 Ok(config) => {
-                    println!("Successfully parsed configuration frame");
+                    info!("Successfully parsed configuration frame");
                     // Update frame size based on configuration
                     self.frame_size = config.calc_data_frame_size();
                     self.max_buffer_size = 30 * 1024 - ((30 * 1024) % self.frame_size);
-                    println!(
+                    info!(
                         "Updated frame_size to {} and max_buffer_size to {}",
                         self.frame_size, self.max_buffer_size
                     );
@@ -233,7 +255,7 @@ impl PDCClient {
         match tokio::time::timeout(Duration::from_secs(1), self.stream.read(&mut buf)).await {
             Ok(Ok(n)) => {
                 if n == 0 {
-                    println!("Connection closed by server");
+                    error!("Connection closed by server");
                     self.shutdown().await;
                     return Err(io::Error::new(
                         io::ErrorKind::ConnectionAborted,
@@ -242,34 +264,33 @@ impl PDCClient {
                     //return Ok(None);
                 }
                 if n == self.frame_size {
-                    //println!("Successfully read complete frame of size {}", n);
                     Ok(Some(buf))
                 } else {
-                    println!("Partial read: {} bytes of expected {}", n, self.frame_size);
+                    warn!("Partial read: {} bytes of expected {}", n, self.frame_size);
                     // You might want to handle partial reads differently
                     Ok(None)
                 }
             }
             Ok(Err(e)) => {
-                println!("Error reading from stream: {}", e);
+                error!("Error reading from stream: {}", e);
                 Err(e)
             }
             Err(_) => {
-                println!("Timeout reading frame");
+                error!("Timeout reading frame");
                 Ok(None)
             }
         }
     }
 
     pub async fn start_stream(&mut self) {
-        println!("PDC client stream starting...");
+        info!("PDC client stream starting...");
         let control_tx = self.control_tx.clone();
 
         // Send command to start data transmission
-        println!("Sending command to start data transmission...");
+        info!("Sending command to start data transmission...");
         let cmd_frame = CommandFrame2011::new_turn_on_transmission(self.idcode);
         if let Err(e) = self.stream.write_all(&cmd_frame.to_hex()).await {
-            println!("Failed to send start transmission command: {}", e);
+            error!("Failed to send start transmission command: {}", e);
             self.shutdown().await;
             return;
         }
@@ -285,14 +306,14 @@ impl PDCClient {
                 Some(control_msg) = control_rx.recv() => {
                     match control_msg {
                         ControlMessage::Stop => {
-                            println!("PDC client received Stop command");
+                            info!("PDC client received Stop command");
                             break;
                         },
                         ControlMessage::GetBuffer => {
                             println!("PDC client received GetBuffer command");
                             match &self.buffer {
                                 BufferType::Stack(buf) => {
-                                    println!("Sending buffer data of size {}", self.max_buffer_size);
+                                    info!("Sending buffer data of size {}", self.max_buffer_size);
                                     if let Err(e) = data_tx.send(buf[..self.max_buffer_size].to_vec()).await {
                                         println!("Failed to send buffer data: {}", e);
                                     }
@@ -300,7 +321,7 @@ impl PDCClient {
                                 BufferType::Heap(_) => {
                                     let result = self.get_buffer_contents();
                                     if let Err(e) = data_tx.send(result).await {
-                                        println!("Failed to send heap buffer data: {}", e);
+                                        info!("Failed to send heap buffer data: {}", e);
                                     }
                                     //println!("Heap buffer not implemented yet");
                                 }
@@ -317,15 +338,15 @@ impl PDCClient {
                         }
                         Ok(None) => {
                             consecutive_errors += 1;
-                            println!("No frame available");
+                            info!("No frame available");
                         }
                         Err(e) => {
-                            println!("Error reading frame: {}", e);
+                            error!("Error reading frame: {}", e);
                             consecutive_errors +=1 ;
                         }
                     }
                     if consecutive_errors >= MAX_CONSECUTIVE_ERRORS{
-                        println!("Too many consecutive errors, shutting down");
+                        error!("Too many consecutive errors, shutting down");
                         break;
                     }
                 }

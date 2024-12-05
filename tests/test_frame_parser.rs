@@ -128,6 +128,45 @@ mod tests {
     }
 
     #[test]
+    fn test_pmu_config_serialization() {
+        use super::*;
+
+        // Create a sample PMU configuration
+        let config_buffer = super::read_hex_file("config_message.bin").unwrap();
+        let config_frame = parse_config_frame_1and2(&config_buffer).unwrap();
+        let pmu_config = &config_frame.pmu_configs[0];
+
+        // Serialize to JSON
+        let json = serde_json::to_string_pretty(pmu_config).unwrap();
+        println!("Serialized PMU Config:\n{}", json);
+
+        // Parse the JSON back into a Value for verification
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Verify specific fields
+        assert_eq!(parsed["idcode"], 7734);
+        assert_eq!(parsed["phnmr"], 4);
+        assert_eq!(parsed["annmr"], 3);
+        assert_eq!(parsed["dgnmr"], 1);
+
+        // Verify station name is properly decoded
+        assert_eq!(parsed["stn"], "Station A");
+
+        // Verify channel names are present and correct
+        let channels = parsed["channels"].as_array().unwrap();
+        assert!(!channels.is_empty());
+
+        // Verify format flags
+        let format_flags = &parsed["format_flags"];
+        assert_eq!(format_flags["freq_dfreq_float"], false);
+        assert_eq!(format_flags["analog_float"], true);
+        assert_eq!(format_flags["phasor_float"], false);
+        assert_eq!(format_flags["phasor_polar"], false);
+
+        // Verify computed properties
+        assert_eq!(parsed["is_polar"], false);
+    }
+    #[test]
     fn test_calc_data_frame_size() {
         // Parse the configuration frame
         let config_buffer = super::read_hex_file("config_message.bin").unwrap();
