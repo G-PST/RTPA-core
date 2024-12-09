@@ -485,6 +485,54 @@ impl PMUConfigurationFrame2011 {
 
         channel_names
     }
+    pub fn get_phasor_columns(&self) -> Vec<String> {
+        let mut channel_names = Vec::new();
+        let station_name = String::from_utf8_lossy(&self.stn).trim().to_string();
+
+        for chunk in self.chnam.chunks(16).take(self.phnmr as usize) {
+            let channel = String::from_utf8_lossy(chunk).trim().to_string();
+            let full_name = format!("{}_{}_{}", station_name, self.idcode, channel);
+            channel_names.push(full_name);
+        }
+
+        channel_names
+    }
+
+    pub fn get_analog_columns(&self) -> Vec<String> {
+        let mut channel_names = Vec::new();
+        let station_name = String::from_utf8_lossy(&self.stn).trim().to_string();
+
+        for chunk in self
+            .chnam
+            .chunks(16)
+            .skip(self.phnmr as usize)
+            .take(self.annmr as usize)
+        {
+            let channel = String::from_utf8_lossy(chunk).trim().to_string();
+            let full_name = format!("{}_{}_{}", station_name, self.idcode, channel);
+            channel_names.push(full_name);
+        }
+
+        channel_names
+    }
+
+    pub fn get_digital_columns(&self) -> Vec<String> {
+        let mut channel_names = Vec::new();
+        let station_name = String::from_utf8_lossy(&self.stn).trim().to_string();
+
+        for chunk in self
+            .chnam
+            .chunks(16)
+            .skip((self.phnmr + self.annmr) as usize)
+            .take(self.dgnmr as usize)
+        {
+            let channel = String::from_utf8_lossy(chunk).trim().to_string();
+            let full_name = format!("{}_{}_{}", station_name, self.idcode, channel);
+            channel_names.push(full_name);
+        }
+
+        channel_names
+    }
 }
 
 // Implement custom serialization

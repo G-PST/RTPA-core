@@ -451,6 +451,10 @@ fn filter_array_by_mask(array: &ArrayRef, mask: &[bool]) -> ArrayRef {
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Setup logging
+    std::fs::create_dir_all("./logs").map_err(|e| {
+        error!("Failed to create logs directory: {}", e);
+        e
+    })?;
     let file_appender = tracing_appender::rolling::hourly("./logs", "pdc_server.log");
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);

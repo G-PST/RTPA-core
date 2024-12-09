@@ -126,6 +126,40 @@ mod tests {
             "CRC mismatch in configuration frame"
         );
     }
+    #[test]
+    fn test_parse_config_frame_multi() {
+        let buffer = super::read_hex_file("config_message_multi.bin").unwrap();
+        let result = parse_config_frame_1and2(&buffer);
+
+        assert!(result.is_ok(), "Failed to parse configuration frame");
+
+        let config_frame = result.unwrap();
+
+        // Add assertions to verify the parsed data
+        println!("Config frame prefix: {:?}", config_frame.prefix);
+        assert_eq!(config_frame.prefix.framesize, 884);
+        assert_eq!(config_frame.prefix.idcode, 7734);
+        assert_eq!(config_frame.time_base, 1000000);
+        assert_eq!(config_frame.num_pmu, 2);
+        assert_eq!(config_frame.data_rate, 30);
+
+        // Verify PMU configuration
+        let pmu_config = &config_frame.pmu_configs[0];
+        //assert_eq!(pmu_config.stn, *b"Station A        ");
+        assert_eq!(pmu_config.idcode, 7734);
+        assert_eq!(pmu_config.format, 4);
+        assert_eq!(pmu_config.phnmr, 4);
+        assert_eq!(pmu_config.annmr, 3);
+        assert_eq!(pmu_config.dgnmr, 1);
+
+        // TODO Add more assertions as needed to verify other fields
+        // Verify CRC
+        let calculated_crc = calculate_crc(&buffer[..buffer.len() - 2]);
+        assert_eq!(
+            calculated_crc, config_frame.chk,
+            "CRC mismatch in configuration frame"
+        );
+    }
 
     #[test]
     fn test_pmu_config_serialization() {
@@ -273,6 +307,33 @@ mod tests {
         let calculated_crc = calculate_crc(&data_buffer[..data_buffer.len() - 2]);
         assert_eq!(calculated_crc, data_frame.chk, "CRC mismatch in data frame");
     }
+    #[test]
+    fn test_channel_name_extraction() {
+        let config_buffer = super::read_hex_file("config_message.bin").unwrap();
+        let config_frame = parse_config_frame_1and2(&config_buffer).unwrap();
+        let pmu_config = &config_frame.pmu_configs[0];
+
+        // Test phasor column names
+        let phasor_columns = pmu_config.get_phasor_columns();
+        assert_eq!(phasor_columns.len(), 4);
+        assert_eq!(phasor_columns[0], "Station A_7734_VA");
+        assert_eq!(phasor_columns[1], "Station A_7734_VB");
+        assert_eq!(phasor_columns[2], "Station A_7734_VC");
+        assert_eq!(phasor_columns[3], "Station A_7734_I1");
+
+        // Test analog column names
+        let analog_columns = pmu_config.get_analog_columns();
+        assert_eq!(analog_columns.len(), 3);
+        assert_eq!(analog_columns[0], "Station A_7734_ANALOG1");
+        assert_eq!(analog_columns[1], "Station A_7734_ANALOG2");
+        assert_eq!(analog_columns[2], "Station A_7734_ANALOG3");
+
+        // Test digital column names
+        let digital_columns = pmu_config.get_digital_columns();
+        assert_eq!(digital_columns.len(), 1);
+        assert_eq!(digital_columns[0], "Station A_7734_BREAKER 1 STATUS");
+    }
+
     #[test]
     fn test_arrow_frame_creation() {
         use arrow::array::{

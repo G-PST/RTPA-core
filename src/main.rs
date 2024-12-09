@@ -31,6 +31,8 @@ enum Commands {
         #[arg(long, default_value_t = 8123)]
         pdc_port: u16,
         #[arg(long, default_value_t = 8080)]
+        pdc_idcode: u16,
+        #[arg(long, default_value_t = 7734)]
         http_port: u16,
         #[arg(long, default_value_t = 120)]
         duration: u16,
@@ -56,12 +58,14 @@ async fn main() -> io::Result<()> {
         Commands::Server {
             pdc_ip,
             pdc_port,
+            pdc_idcode,
             http_port,
             duration,
         } => {
             // Start the pdc buffer server
             std::env::set_var("PDC_HOST", &pdc_ip);
             std::env::set_var("PDC_PORT", &pdc_port.to_string());
+            std::env::set_var("PDC_IDCODE", &pdc_idcode.to_string());
             std::env::set_var("SERVER_PORT", &http_port.to_string());
             std::env::set_var("BUFFER_DURATION_SECS", &duration.to_string());
 
