@@ -227,7 +227,7 @@ pub fn parse_config_frame_1and2(buffer: &[u8]) -> Result<ConfigurationFrame1and2
         };
 
         // determine the next length of bytes to read populate the chnam field.
-        let chnam_bytes_len = 16 * (phnmr + annmr + 16 * dgnmr) as usize;
+        let chnam_bytes_len: usize = (16 * (phnmr + annmr + 16 * dgnmr)) as usize;
         // read from offset to chname_bytes_len into a vec<u8> variable.
         let chnam = buffer[offset..offset + chnam_bytes_len].to_vec();
         offset += chnam_bytes_len as usize;
