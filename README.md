@@ -18,7 +18,50 @@ Running the CLI using
 cargo run --help
 ```
 
-## How to ...
+## Running With Docker-Compose
+
+### Using the mock-pdc server (all platforms)
+
+*All data will be identical with the exception of timestamps*
+
+First build the containers
+```console
+docker-compose build
+```
+
+Then run
+```console
+docker-compose up
+```
+
+### Using openPDC (x86/64)
+*Data will be randomized and simulate a single PDC/PMU*
+
+Assuming you have build the container using the instructions above. You can download and run the open-pdc server and pmu buffer using the command below.
+
+```console
+docker-compose -f docker-compose-openpdc.yml up --no-attach open-pdc
+```
+
+### Login to OpenPDC
+
+You can log in to the local [openPDC](http://127.0.0.1:8280) instance and update the configuration. The default username and password are.
+
+**USER**
+```
+.\admin
+```
+
+**PASSWORD**
+```
+admin
+```
+
+You can also install the latest release of openPDC with more features [here](https://github.com/GridProtectionAlliance/openPDC/releases/tag/v2.9.148)
+
+
+## Running the Application with Cargo
+
 
 ### ... start the Mock PDC server
 
@@ -75,3 +118,26 @@ s = requests.get(url, timeout=10)
 df = pd.read_feather(io.BytesIO(requests.get(url, timeout=10).content))
 df.head()
 ```
+
+
+## Buidling the application Binary
+
+```console
+cargo build --release
+```
+
+This will build the application binary in .target/release. For windows, the executable will be ./target/release/pmu.exe
+
+You can add the executable to your path and run the commands similar to the commands above replacing **cargo run** with **pmu**.
+```console
+cargo run server
+``` 
+vs 
+``` console
+pmu server
+```
+or 
+```console
+./target/release/pmu mock-pdc
+```
+

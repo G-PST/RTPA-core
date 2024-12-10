@@ -6,19 +6,25 @@ services:
     networks:
       - pmu-network
 
+    ports:
+      - "8280:8280"
+      - "8900:8900"
+
   pmu-server:
     build: .
     container_name: pmu-server
+    volumes: 
+      - ./logs:/usr/local/bin/logs
     command:
       [
         "pmu",
         "server",
         "--pdc-ip",
-        "mock-pdc",
+        "open-pdc",
         "--pdc-port",
-        "8123",
+        "8900",
         "--pdc-idcode",
-        "8080",
+        "235",
         "--http-port",
         "7734",
         "--duration",
@@ -35,9 +41,7 @@ services:
         delay: 15s
         max_attempts: 3
         window: 120s
-    #depends_on:
-    #  open-pdc:
-    #condition: service_healthy
+
 
 networks:
   pmu-network:
