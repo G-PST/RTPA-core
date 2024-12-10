@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y libssl-dev && rm -rf /var/lib/apt/lists
 
 WORKDIR /usr/local/bin
 COPY --from=builder /app/target/release/pmu .
+COPY tests/test_data ./tests/test_data
 
 # Environment variables
 ENV PDC_HOST=localhost \

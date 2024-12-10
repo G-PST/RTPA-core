@@ -1,0 +1,44 @@
+---
+services:
+  open-pdc:
+    image: gridprotectionalliance/openpdc:v2.9.148
+    container_name: openPDC
+    networks:
+      - pmu-network
+
+  pmu-server:
+    build: .
+    container_name: pmu-server
+    command:
+      [
+        "pmu",
+        "server",
+        "--pdc-ip",
+        "mock-pdc",
+        "--pdc-port",
+        "8123",
+        "--pdc-idcode",
+        "8080",
+        "--http-port",
+        "7734",
+        "--duration",
+        "120",
+      ]
+    ports:
+      - "7734:7734"
+    networks:
+      - pmu-network
+    restart: on-failure:3
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 15s
+        max_attempts: 3
+        window: 120s
+    #depends_on:
+    #  open-pdc:
+    #condition: service_healthy
+
+networks:
+  pmu-network:
+    driver: bridge

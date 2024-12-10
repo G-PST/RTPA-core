@@ -34,10 +34,10 @@ use std::env;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 // Connection status of the pdc server.
 #[derive(Debug, Clone, Serialize)]
@@ -181,6 +181,22 @@ type DataResponse = (
     Bytes,
 );
 
+async fn get_health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let status = state.connection_status.lock().await.clone();
+
+    Json(serde_json::json!({
+        "status": status,
+        "healthy": matches!(status, ConnectionStatus::Connected)
+    }))
+}
+async fn get_version() -> Json<serde_json::Value> {
+    // Return some test configuration
+    Json(serde_json::json!({
+        "software_name": env!("CARGO_PKG_NAME"),
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
+}
+
 async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.config)
 }
@@ -196,6 +212,7 @@ async fn get_data_all(
     State(state): State<AppState>,
     Query(time_params): Query<TimeRangeParams>,
 ) -> Result<DataResponse, (StatusCode, Json<ErrorResponse>)> {
+    info!("Received request for all data");
     process_data_request(state, time_params, None).await
 }
 
@@ -204,17 +221,81 @@ async fn get_data_filtered(
     Query(time_params): Query<TimeRangeParams>,
     JsonForm(column_selection): JsonForm<ColumnSelection>,
 ) -> Result<DataResponse, (StatusCode, Json<ErrorResponse>)> {
+    info!("Received request for filtered data");
+    process_data_request(state, time_params, Some(column_selection)).await
+}
+
+async fn get_phasors_data(
+    State(state): State<AppState>,
+    Query(time_params): Query<TimeRangeParams>,
+) -> Result<DataResponse, (StatusCode, Json<ErrorResponse>)> {
+    info!("Received request for phasor data");
+
+    let phasor_columns = state
+        .config
+        .pmu_configs
+        .iter()
+        .flat_map(|config| config.get_phasor_columns())
+        .collect();
+
+    let column_selection = ColumnSelection {
+        columns: phasor_columns,
+    };
+
+    process_data_request(state, time_params, Some(column_selection)).await
+}
+
+async fn get_analog_data(
+    State(state): State<AppState>,
+    Query(time_params): Query<TimeRangeParams>,
+) -> Result<DataResponse, (StatusCode, Json<ErrorResponse>)> {
+    info!("Received request for analog data");
+
+    let analog_columns = state
+        .config
+        .pmu_configs
+        .iter()
+        .flat_map(|config| config.get_analog_columns())
+        .collect();
+
+    let column_selection = ColumnSelection {
+        columns: analog_columns,
+    };
+
+    process_data_request(state, time_params, Some(column_selection)).await
+}
+
+async fn get_digital_data(
+    State(state): State<AppState>,
+    Query(time_params): Query<TimeRangeParams>,
+) -> Result<DataResponse, (StatusCode, Json<ErrorResponse>)> {
+    info!("Received request for digital data");
+
+    let digital_columns = state
+        .config
+        .pmu_configs
+        .iter()
+        .flat_map(|config| config.get_digital_columns())
+        .collect();
+
+    let column_selection = ColumnSelection {
+        columns: digital_columns,
+    };
+
     process_data_request(state, time_params, Some(column_selection)).await
 }
 
 // Common processing function
+
 async fn process_data_request(
     state: AppState,
     time_params: TimeRangeParams,
     column_selection: Option<ColumnSelection>,
     //data_rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
 ) -> Result<DataResponse, (StatusCode, Json<ErrorResponse>)> {
-    debug!(
+    let start = Instant::now();
+
+    info!(
         "Processing request - time_params: {:?}, has_column_selection: {}",
         time_params,
         column_selection.is_some()
@@ -244,6 +325,7 @@ async fn process_data_request(
         )
     };
     // Send request for buffer
+
     state
         .control_tx
         .lock()
@@ -340,7 +422,6 @@ async fn process_data_request(
         let channel_arrays = extract_channel_values(&buffer, state.frame_size, info);
         for array in channel_arrays {
             let filtered_array = filter_array_by_mask(&array, &time_mask);
-            info!("Filtered array length: {}", filtered_array.len());
             arrays.push(filtered_array);
         }
     }
@@ -397,6 +478,11 @@ async fn process_data_request(
             )
         })?;
     }
+
+    info!(
+        "Total request processing took {} ms",
+        start.elapsed().as_millis()
+    );
 
     Ok((
         StatusCode::OK,
@@ -555,13 +641,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
     // Set up Routes
     let app = Router::new()
+        .route("/health", get(get_health))
+        .route("/version", get(get_version))
         .route("/config", get(get_config))
         .route("/status", get(get_status))
         .route("/data", get(get_data_all).post(get_data_filtered))
+        .route("/data/phasors", get(get_phasors_data))
+        .route("/data/analogs", get(get_analog_data))
+        .route("/data/digitals", get(get_digital_data))
         .with_state(app_state);
 
     // Start server
-    let addr = SocketAddr::from(([127, 0, 0, 1], config.server_port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
     println!("Server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

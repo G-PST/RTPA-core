@@ -1,0 +1,47 @@
+---
+services:
+  mock-pdc:
+    build: .
+    container_name: mock-pdc
+    command: ["pmu", "mock-pdc", "--ip", "mock-pdc", "--port", "8123"]
+    ports:
+      - "8123:8123"
+    volumes:
+      - ./tests/test_data:/app/tests/test_data
+    networks:
+      - pmu-network
+    #healthcheck:
+    #  test: ["CMD", "nc", "-z", "localhost", "8123"]
+    #  interval: 5s
+    #  timeout: 3s
+    #  retries: 10
+
+  pmu-server:
+    build: .
+    container_name: pmu-server
+    command:
+      [
+        "pmu",
+        "server",
+        "--pdc-ip",
+        "mock-pdc",
+        "--pdc-port",
+        "8123",
+        "--pdc-idcode",
+        "8080",
+        "--http-port",
+        "7734",
+        "--duration",
+        "120",
+      ]
+    ports:
+      - "7734:7734"
+    networks:
+      - pmu-network
+    #depends_on:
+    #  mock-pdc:
+    #condition: service_healthy
+
+networks:
+  pmu-network:
+    driver: bridge
