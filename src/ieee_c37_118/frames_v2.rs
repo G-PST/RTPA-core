@@ -310,20 +310,35 @@ impl ConfigurationFrame1and2_2011 {
             // Add phasor channels
             // TODO. Need to parse two bits in order to determine the phasor type
             // Need to verify!!!
-            let phasor_type_result: Result<ChannelDataType, &'static str> = match pmu_config.format
-            {
-                0x0000 => Ok(ChannelDataType::PhasorIntRectangular), // Integer, Rectangular
-                0x0001 => Ok(ChannelDataType::PhasorFloatRectangular), // Float, Rectangular
-                0x0002 => Ok(ChannelDataType::PhasorIntPolar),       // Integer, Polar
-                0x0003 => Ok(ChannelDataType::PhasorFloatPolar),     // Float, Polar
-                _ => Err("Invalid phasor format"),
+            //
+            let phasor_type_result: Result<ChannelDataType, String> = {
+                let format = pmu_config.format; // Assuming u16
+                let phasor_float = (format & 0x0002) != 0; // Bit 1: 0=int, 1=float for phasors
+                let phasor_polar = (format & 0x0001) != 0; // Bit 0: 0=rectangular, 1=polar
+                let analog_float = (format & 0x0004) != 0; // Bit 2: 0=int, 1=float for analogs
+                let freq_float = (format & 0x0008) != 0; // Bit 3: 0=int, 1=float for freq/dfreq
+                let unused_bits = format & 0xFFF0; // Bits 4-15 should be 0
+
+                // Assuming this function is determining the type for a specific channel
+                // Adjust logic based on whether this is for phasor, analog, digital, or freq
+                match () {
+                    // Replace with actual channel context if available
+                    () if unused_bits != 0 => {
+                        Err(format!("Invalid format, unused bits set: 0x{:04x}", format))
+                    }
+                    () => {
+                        // Example: Assuming this block is for phasor channels
+                        match (phasor_float, phasor_polar) {
+                            (false, false) => Ok(ChannelDataType::PhasorIntRectangular),
+                            (false, true) => Ok(ChannelDataType::PhasorIntPolar),
+                            (true, false) => Ok(ChannelDataType::PhasorFloatRectangular),
+                            (true, true) => Ok(ChannelDataType::PhasorFloatPolar),
+                        }
+                    }
+                }
             };
+
             let phasor_type = phasor_type_result.unwrap();
-            let phasor_type = if pmu_config.format & 0x0002 != 0 {
-                ChannelDataType::PhasorFloatPolar
-            } else {
-                ChannelDataType::PhasorIntRectangular
-            };
 
             let phasor_size = pmu_config.phasor_size();
             for name in channel_names.iter().take(pmu_config.phnmr as usize) {

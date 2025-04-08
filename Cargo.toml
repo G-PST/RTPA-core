@@ -40,3 +40,7 @@ harness = false
 [[bench]]
 name = "accumulator_throughput"
 harness = false
+
+[[test]]
+name = "e2e_test"
+path = "tests/e2e_test.rs"

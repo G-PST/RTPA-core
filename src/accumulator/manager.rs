@@ -1,8 +1,8 @@
 use super::sparse::{
-    Accumulate, Accumulator, C37118TimestampAccumulator, F32Accumulator, I32Accumulator,
-    U16Accumulator,
+    Accumulate, Accumulator, C37118TimestampAccumulator, F32Accumulator, I16Accumulator,
+    I32Accumulator, U16Accumulator,
 };
-use arrow::array::{ArrayRef, Float32Array, Int32Array, UInt16Array};
+use arrow::array::{ArrayRef, Float32Array, Int16Array, Int32Array, Int64Array, UInt16Array};
 use arrow::buffer::{Buffer, MutableBuffer};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -96,9 +96,10 @@ impl AccumulatorManager {
                 let capacity = match config.var_type {
                     DataType::Float32 => batch_size * std::mem::size_of::<f32>(),
                     DataType::Int32 => batch_size * std::mem::size_of::<i32>(),
+                    DataType::Int16 => batch_size * std::mem::size_of::<i16>(),
                     DataType::UInt16 => batch_size * std::mem::size_of::<u16>(),
                     DataType::Int64 => batch_size * std::mem::size_of::<i64>(),
-                    DataType::Timestamp(_, _) => batch_size * std::mem::size_of::<i64>(),
+                    //DataType::Timestamp(_, _) => batch_size * std::mem::size_of::<i64>(),
                     _ => panic!("Unsupported data type: {:?}", config.var_type),
                 };
                 Arc::new(Mutex::new(MutableBuffer::new(capacity)))
@@ -154,13 +155,16 @@ impl AccumulatorManager {
                         (DataType::UInt16, 2) => Accumulator::U16(U16Accumulator {
                             var_loc: config.var_loc,
                         }),
+                        (DataType::Int16, 2) => Accumulator::I16(I16Accumulator {
+                            var_loc: config.var_loc,
+                        }),
                         (DataType::Int32, 4) => Accumulator::I32(I32Accumulator {
                             var_loc: config.var_loc,
                         }),
                         (DataType::Float32, 4) => Accumulator::F32(F32Accumulator {
                             var_loc: config.var_loc,
                         }),
-                        (DataType::Timestamp(_, _), 8) => {
+                        (DataType::Int64, 8) => {
                             Accumulator::Timestamp(C37118TimestampAccumulator {
                                 var_loc: config.var_loc,
                             })
@@ -402,6 +406,26 @@ impl AccumulatorManager {
                             )
                         };
                         Arc::new(UInt16Array::from(values.to_vec())) as ArrayRef
+                    }
+                    DataType::Int16 => {
+                        let num_values = data_buffer.len() / std::mem::size_of::<i16>();
+                        let values = unsafe {
+                            std::slice::from_raw_parts(
+                                data_buffer.as_ptr() as *const i16,
+                                num_values,
+                            )
+                        };
+                        Arc::new(Int16Array::from(values.to_vec())) as ArrayRef
+                    }
+                    DataType::Int64 => {
+                        let num_values = data_buffer.len() / std::mem::size_of::<i64>();
+                        let values = unsafe {
+                            std::slice::from_raw_parts(
+                                data_buffer.as_ptr() as *const i64,
+                                num_values,
+                            )
+                        };
+                        Arc::new(Int64Array::from(values.to_vec())) as ArrayRef
                     }
                     _ => panic!("Unsupported data type"),
                 }

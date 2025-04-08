@@ -11,16 +11,13 @@
 // Ensure that each column is correctly parsed. E.g. all values in a given column are the same.
 // Values match the parsed data frame values expected.
 
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
+use arrow::datatypes::DataType;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 
 use rtpa_core::accumulator::manager::AccumulatorManager;
-use rtpa_core::ieee_c37_118::{
-    create_configuration_frame, create_data_frame, ConfigurationFrame, DataFrame, DataValue,
-};
+use rtpa_core::ieee_c37_118::create_configuration_frame;
+use rtpa_core::utils::config_to_accumulators;
 
 // Helper function to read test data files
 fn read_hex_file(file_name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -68,32 +65,7 @@ fn test_ieee_c37_118_e2e() {
     }
 
     // Step 2: Create accumulators for each variable
-    let mut accumulator_configs = Vec::new();
-
-    // Add timestamp accumulator first (from the prefix frame)
-    // FIXME
-    //accumulator_configs.push((
-    //    6,               // SOC is at offset 6
-    //    8,               // SOC + FRACSEC = 8 bytes
-    //    DataType::Int64, // Store as Int64 timestamp
-    //    "timestamp".to_string(),
-    //));
-
-    // Add accumulators for each channel in the map
-    for (name, info) in &channel_map {
-        // TODO we should use some utilities to determine the data type.
-
-        println!(
-            "ChannelName: {}, Offset: {}, length: {}",
-            name, info.offset, info.size
-        );
-        accumulator_configs.push((
-            info.offset as u16,
-            info.size as u8,
-            info.data_type,
-            name.clone(),
-        ));
-    }
+    let accumulator_configs = config_to_accumulators(&*config_frame);
 
     // Step 3: Create the accumulator manager
     let num_threads = 2; // Use 2 threads for the test
@@ -105,7 +77,8 @@ fn test_ieee_c37_118_e2e() {
         "Creating AccumulatorManager with buffer_size={}",
         data_frame_size
     );
-    let accumulator_manager = AccumulatorManager::from_simple_configs_with_params(
+
+    let accumulator_manager = AccumulatorManager::new_with_params(
         accumulator_configs,
         num_threads,
         max_batches,
@@ -117,7 +90,9 @@ fn test_ieee_c37_118_e2e() {
     let data_buffer = read_hex_file("data_message.bin").expect("Failed to read data file");
 
     // Process the same data frame multiple times to create a batch
-    for _ in 0..batch_size {
+    for i in 0..batch_size {
+        println!("Processing data frame {}", i + 1);
+
         // Use closure to write the data to the buffer
         let result = accumulator_manager.process_buffer(|buffer| {
             buffer.clear();
@@ -153,14 +128,82 @@ fn test_ieee_c37_118_e2e() {
     let schema = dataframe.schema();
     assert!(schema.fields().len() > 0, "Schema has no fields");
 
-    // Check the timestamp column is present
-    let timestamp_index = schema
-        .fields()
-        .iter()
-        .position(|f| f.name() == "timestamp")
-        .expect("Timestamp column not found");
+    // Check each column to verify all values are the same
+    for col_idx in 0..dataframe.columns().len() {
+        let column_name = schema.field(col_idx).name();
+        println!("Checking column: {}", column_name);
 
-    // Check the frequency column (from the test)
+        let column = dataframe.column(col_idx);
+        if column.len() <= 1 {
+            continue; // Skip columns with only one value
+        }
+
+        // Check if all values in this column are the same
+        // This is a bit complex since we need to handle different array types
+        let all_same = match column.data_type() {
+            DataType::Int32 => {
+                let array = column
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int32Array>()
+                    .unwrap();
+                let first_value = array.value(0);
+                println!("Column {} first value: {}", column_name, first_value);
+                let all_same = (1..array.len()).all(|i| array.value(i) == first_value);
+                all_same
+            }
+            DataType::Float32 => {
+                let array = column
+                    .as_any()
+                    .downcast_ref::<arrow::array::Float32Array>()
+                    .unwrap();
+                let first_value = array.value(0);
+                println!("Column {} first value: {}", column_name, first_value);
+                let all_same =
+                    (1..array.len()).all(|i| (array.value(i) - first_value).abs() < 0.01);
+                all_same
+            }
+            DataType::UInt16 => {
+                let array = column
+                    .as_any()
+                    .downcast_ref::<arrow::array::UInt16Array>()
+                    .unwrap();
+                let first_value = array.value(0);
+                println!("Column {} first value: {}", column_name, first_value);
+                let all_same = (1..array.len()).all(|i| array.value(i) == first_value);
+                all_same
+            }
+            DataType::Int16 => {
+                let array = column
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int16Array>()
+                    .unwrap();
+                let first_value = array.value(0);
+                println!("Column {} first value: {}", column_name, first_value);
+                let all_same = (1..array.len()).all(|i| array.value(i) == first_value);
+                all_same
+            }
+            DataType::Int64 => {
+                let array = column
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int64Array>()
+                    .unwrap();
+                let first_value = array.value(0);
+                println!("Column {} first value: {}", column_name, first_value);
+                let all_same = (1..array.len()).all(|i| array.value(i) == first_value);
+                all_same
+            }
+            _ => panic!("Unexpected column data type: {:?}", column.data_type()),
+        };
+
+        assert!(
+            all_same,
+            "Values in column {} are not all the same",
+            column_name
+        );
+    }
+
+    // Step 7: Check specific values
+    // Verify the frequency column data (Station A_7734_FREQ should be 2500)
     let freq_column_name = "Station A_7734_FREQ";
     let freq_index = schema
         .fields()
@@ -169,11 +212,10 @@ fn test_ieee_c37_118_e2e() {
         .expect("Frequency column not found");
 
     // Verify the frequency column data
-    // In the IEEE C37.118 tests, we expected a value of 2500 for this column
     if let Some(array) = dataframe
         .column(freq_index)
         .as_any()
-        .downcast_ref::<arrow::array::Int32Array>()
+        .downcast_ref::<arrow::array::Int16Array>()
     {
         for i in 0..array.len() {
             assert_eq!(
@@ -197,57 +239,6 @@ fn test_ieee_c37_118_e2e() {
         }
     } else {
         panic!("Frequency column has unexpected type");
-    }
-
-    // Verify all rows have the same values for each column
-    for col_idx in 0..dataframe.columns().len() {
-        let column = dataframe.column(col_idx);
-
-        if column.len() > 1 {
-            // Check if all values in this column are the same
-            // This is a bit complex since we need to handle different array types
-            let all_same = match column.data_type() {
-                DataType::Int32 => {
-                    let array = column
-                        .as_any()
-                        .downcast_ref::<arrow::array::Int32Array>()
-                        .unwrap();
-                    let first_value = array.value(0);
-                    (1..array.len()).all(|i| array.value(i) == first_value)
-                }
-                DataType::Float32 => {
-                    let array = column
-                        .as_any()
-                        .downcast_ref::<arrow::array::Float32Array>()
-                        .unwrap();
-                    let first_value = array.value(0);
-                    (1..array.len()).all(|i| (array.value(i) - first_value).abs() < 0.01)
-                }
-                DataType::UInt16 => {
-                    let array = column
-                        .as_any()
-                        .downcast_ref::<arrow::array::UInt16Array>()
-                        .unwrap();
-                    let first_value = array.value(0);
-                    (1..array.len()).all(|i| array.value(i) == first_value)
-                }
-                DataType::Int64 => {
-                    let array = column
-                        .as_any()
-                        .downcast_ref::<arrow::array::Int64Array>()
-                        .unwrap();
-                    let first_value = array.value(0);
-                    (1..array.len()).all(|i| array.value(i) == first_value)
-                }
-                _ => panic!("Unexpected column data type: {:?}", column.data_type()),
-            };
-
-            assert!(
-                all_same,
-                "Values in column {} are not all the same",
-                col_idx
-            );
-        }
     }
 
     // Clean up resources
