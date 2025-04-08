@@ -1,4 +1,5 @@
 #![allow(unused)]
+use super::models::{ChannelDataType, ChannelInfo, DataValue};
 use crate::ieee_c37_118::utils::calculate_crc;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{self, Deserialize, Serialize};
@@ -244,25 +245,6 @@ impl<T> PMUDataFrame<T> {
 pub type PMUDataFrameFixedFreq2011 = PMUDataFrame<i16>;
 pub type PMUDataFrameFloatFreq2011 = PMUDataFrame<f32>;
 
-#[derive(Debug, Clone)]
-pub enum ChannelDataType {
-    PhasorFloat, // 8 bytes (magnitude + angle as f32)
-    PhasorFixed, // 4 bytes (magnitude + angle as i16)
-    AnalogFloat, // 4 bytes (f32)
-    AnalogFixed, // 2 bytes (i16)
-    Digital,     // 2 bytes (u16)
-    FreqFloat,   // 4 bytes (f32)
-    FreqFixed,   // 2 bytes (i16)
-    DfreqFloat,  // 4 bytes (f32)
-    DfreqFixed,  // 2 bytes (i16)
-}
-#[derive(Debug, Clone)]
-pub struct ChannelInfo {
-    pub data_type: ChannelDataType,
-    pub offset: usize, // Offset from start of PMU data section
-    pub size: usize,   // Size in bytes
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfigurationFrame1and2_2011 {
     pub prefix: PrefixFrame2011,
@@ -326,10 +308,21 @@ impl ConfigurationFrame1and2_2011 {
             };
 
             // Add phasor channels
+            // TODO. Need to parse two bits in order to determine the phasor type
+            // Need to verify!!!
+            let phasor_type_result: Result<ChannelDataType, &'static str> = match pmu_config.format
+            {
+                0x0000 => Ok(ChannelDataType::PhasorIntRectangular), // Integer, Rectangular
+                0x0001 => Ok(ChannelDataType::PhasorFloatRectangular), // Float, Rectangular
+                0x0002 => Ok(ChannelDataType::PhasorIntPolar),       // Integer, Polar
+                0x0003 => Ok(ChannelDataType::PhasorFloatPolar),     // Float, Polar
+                _ => Err("Invalid phasor format"),
+            };
+            let phasor_type = phasor_type_result.unwrap();
             let phasor_type = if pmu_config.format & 0x0002 != 0 {
-                ChannelDataType::PhasorFloat
+                ChannelDataType::PhasorFloatPolar
             } else {
-                ChannelDataType::PhasorFixed
+                ChannelDataType::PhasorIntRectangular
             };
 
             let phasor_size = pmu_config.phasor_size();

@@ -81,23 +81,18 @@ fn test_ieee_c37_118_e2e() {
 
     // Add accumulators for each channel in the map
     for (name, info) in &channel_map {
-        let data_type = match info.data_type {
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::PhasorFloat => DataType::Float32,
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::PhasorFixed => DataType::Int32,
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::AnalogFloat => DataType::Float32,
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::AnalogFixed => DataType::Int32,
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::Digital => DataType::UInt16,
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::FreqFloat => DataType::Float32,
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::FreqFixed => DataType::Int32,
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::DfreqFloat => DataType::Float32,
-            rtpa_core::ieee_c37_118::frames::ChannelDataType::DfreqFixed => DataType::Int32,
-        };
+        // TODO we should use some utilities to determine the data type.
 
         println!(
             "ChannelName: {}, Offset: {}, length: {}",
             name, info.offset, info.size
         );
-        accumulator_configs.push((info.offset as u16, info.size as u8, data_type, name.clone()));
+        accumulator_configs.push((
+            info.offset as u16,
+            info.size as u8,
+            info.data_type,
+            name.clone(),
+        ));
     }
 
     // Step 3: Create the accumulator manager

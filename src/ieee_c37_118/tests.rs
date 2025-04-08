@@ -1,10 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::ieee_c37_118::frames::{DataFrame, DataValue, FrameType};
+    use crate::ieee_c37_118::frames::{DataFrame, FrameType};
     use crate::ieee_c37_118::frames_v2::{
         CommandFrame2011, ConfigurationFrame1and2_2011, DataFrame2011, PMUConfigurationFrame2011,
         PMUFrameType, PMUValues, PrefixFrame2011,
     };
+    use crate::ieee_c37_118::models::DataValue;
     use crate::ieee_c37_118::utils::{calculate_crc, validate_checksum};
     use std::fs;
     use std::path::Path;

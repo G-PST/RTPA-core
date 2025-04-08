@@ -2,8 +2,8 @@
 
 // Public modules
 pub mod frames;
+pub mod models;
 pub mod utils;
-
 // Version-specific implementations
 pub mod frames_v2;
 
@@ -16,8 +16,7 @@ mod tests;
 
 // Re-export version-agnostic interfaces
 pub use frames::{
-    ChannelDataType, ChannelInfo, CommandFrame, ConfigurationFrame, DataFrame, DataValue, Frame,
-    FrameType, ParseError, PrefixFrame,
+    CommandFrame, ConfigurationFrame, DataFrame, Frame, FrameType, ParseError, PrefixFrame,
 };
 
 // Factory functions to create the appropriate frame based on protocol version

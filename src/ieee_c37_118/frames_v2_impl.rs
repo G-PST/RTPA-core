@@ -1,8 +1,9 @@
 #![allow(unused)]
 
+use super::models::{ChannelDataType, ChannelInfo, DataValue};
+
 use crate::ieee_c37_118::frames::{
-    ChannelDataType, ChannelInfo, CommandFrame, ConfigurationFrame, DataFrame, DataValue, Frame,
-    FrameType, ParseError, PrefixFrame,
+    CommandFrame, ConfigurationFrame, DataFrame, Frame, FrameType, ParseError, PrefixFrame,
 };
 use crate::ieee_c37_118::frames_v2::{
     CommandFrame2011, ConfigurationFrame1and2_2011, DataFrame2011, PMUConfigurationFrame2011,
@@ -258,40 +259,10 @@ impl ConfigurationFrame for ConfigurationFrame1and2_2011 {
         let mut result = HashMap::new();
 
         for (key, value) in v2_map {
-            let data_type = match value.data_type {
-                crate::ieee_c37_118::frames_v2::ChannelDataType::PhasorFloat => {
-                    ChannelDataType::PhasorFloat
-                }
-                crate::ieee_c37_118::frames_v2::ChannelDataType::PhasorFixed => {
-                    ChannelDataType::PhasorFixed
-                }
-                crate::ieee_c37_118::frames_v2::ChannelDataType::AnalogFloat => {
-                    ChannelDataType::AnalogFloat
-                }
-                crate::ieee_c37_118::frames_v2::ChannelDataType::AnalogFixed => {
-                    ChannelDataType::AnalogFixed
-                }
-                crate::ieee_c37_118::frames_v2::ChannelDataType::Digital => {
-                    ChannelDataType::Digital
-                }
-                crate::ieee_c37_118::frames_v2::ChannelDataType::FreqFloat => {
-                    ChannelDataType::FreqFloat
-                }
-                crate::ieee_c37_118::frames_v2::ChannelDataType::FreqFixed => {
-                    ChannelDataType::FreqFixed
-                }
-                crate::ieee_c37_118::frames_v2::ChannelDataType::DfreqFloat => {
-                    ChannelDataType::DfreqFloat
-                }
-                crate::ieee_c37_118::frames_v2::ChannelDataType::DfreqFixed => {
-                    ChannelDataType::DfreqFixed
-                }
-            };
-
             result.insert(
                 key,
                 ChannelInfo {
-                    data_type,
+                    data_type: value.data_type,
                     offset: value.offset,
                     size: value.size,
                 },

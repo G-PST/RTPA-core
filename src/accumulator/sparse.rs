@@ -17,7 +17,6 @@ use arrow::buffer::MutableBuffer;
 // statically declare error messages
 const ERR_SLICE_LEN_2: &str = "Input slice must be exactly 2 bytes";
 const ERR_SLICE_LEN_4: &str = "Input slice must be exactly 4 bytes";
-
 // Types of available accumulators 2 bytes each to parse up to 65KB buffers.
 
 pub enum Accumulator {
@@ -25,6 +24,7 @@ pub enum Accumulator {
     F32(F32Accumulator),
     I32(I32Accumulator),
     I16(I16Accumulator),
+    RadianInt(RadianI16Accumulator),
     Timestamp(C37118TimestampAccumulator),
 }
 
@@ -35,6 +35,7 @@ impl super::sparse::Accumulate for Accumulator {
             Accumulator::I32(acc) => acc.accumulate(input_buffer, output_buffer),
             Accumulator::F32(acc) => acc.accumulate(input_buffer, output_buffer),
             Accumulator::I16(acc) => acc.accumulate(input_buffer, output_buffer),
+            Accumulator::RadianInt(acc) => acc.accumulate(input_buffer, output_buffer),
             Accumulator::Timestamp(acc) => acc.accumulate(input_buffer, output_buffer),
         }
     }
@@ -106,6 +107,23 @@ impl Accumulate for U16Accumulator {
         // convert to u16 value and insert as little endian.
         let value = u16::from_be_bytes(slice.try_into().expect(ERR_SLICE_LEN_2));
         output_buffer.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
+pub struct RadianI16Accumulator {
+    pub var_loc: u16,
+}
+impl Accumulate for RadianI16Accumulator {
+    fn accumulate(&self, input_buffer: &[u8], output_buffer: &mut MutableBuffer) {
+        let loc = self.var_loc as usize;
+        let slice = &input_buffer[loc..loc + 2];
+
+        // convert to 16 value and insert as little endian.
+        let value = i16::from_be_bytes(slice.try_into().expect(ERR_SLICE_LEN_2));
+
+        // Divide value by 10000 to scale it down to radians.
+        let scaled_value = value / 10000;
+        output_buffer.extend_from_slice(&scaled_value.to_le_bytes());
     }
 }
 

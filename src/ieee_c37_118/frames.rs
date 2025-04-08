@@ -1,3 +1,4 @@
+use super::models::{ChannelInfo, DataValue};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
@@ -168,42 +169,4 @@ pub trait DataFrame: Frame {
     fn from_bytes(bytes: &[u8], config: &dyn ConfigurationFrame) -> Result<Self, ParseError>
     where
         Self: Sized;
-}
-
-/// Represents a channel's information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChannelInfo {
-    pub data_type: ChannelDataType,
-    pub offset: usize,
-    pub size: usize, // TODO remove if not necessary. (it shouldn't be for accumulator but might for single frame deserialization.)
-}
-
-/// Represents the data type of a channel
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ChannelDataType {
-    // Need to add whether these are polar or not.
-    PhasorFloatRectangular,
-    PhasorFloatPolar,
-    PhasorIntRectangular,
-    PhasorIntPolar,
-    AnalogFloat,
-    AnalogFixed,
-    Digital,
-    FreqFloat,
-    FreqFixed,
-    DfreqFloat,
-    DfreqFixed,
-}
-
-/// Represents a value from a data frame
-#[derive(Debug, Clone)]
-pub enum DataValue {
-    PhasorFloatRectangular { x: f32, y: f32 },
-    PhasorFloatPolar { magnitude: f32, angle: f32 },
-    PhasorIntRectangular { x: i16, y: i16 },
-    PhasorIntPolar { magnitude: u16, angle: i16 }, // Angle is in radians * 10^4.
-    Float(f32),
-    Fixed(i16),
-    Digital(u16),
-    Integer(i32),
 }
