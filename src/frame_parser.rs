@@ -54,6 +54,8 @@ pub fn parse_command_frame(buffer: &[u8]) -> Result<Frame, ParseError> {
     }))
 }
 
+// NO longer needed. Instead we will use the configuration frame to
+// generate Sparse Accumulators.
 pub fn parse_data_frames(
     buffer: &[u8],
     config: &ConfigurationFrame1and2_2011,

@@ -1,8 +1,8 @@
 // benches/parsing.rs
 #![allow(unused)]
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pmu::frame_parser::{parse_config_frame_1and2, parse_data_frames};
-use pmu::frames::{
+use rtpa_core::frame_parser::{parse_config_frame_1and2, parse_data_frames};
+use rtpa_core::frames::{
     calculate_crc, ConfigurationFrame1and2_2011, DataFrame2011, PMUConfigurationFrame2011,
     PMUFrameType, PrefixFrame2011,
 };
