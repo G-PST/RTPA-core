@@ -2,6 +2,7 @@ use super::models::{ChannelInfo, DataValue};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
+use std::fmt;
 
 /// Represents errors that can occur during parsing
 #[derive(Debug)]
@@ -11,7 +12,20 @@ pub enum ParseError {
     InvalidChecksum,
     InvalidFormat,
     InvalidHeader,
-    // Add more specific error types as needed
+    VersionNotSupported, // Add more specific error types as needed
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParseError::InvalidLength => write!(f, "Invalid length"),
+            ParseError::InvalidFrameType => write!(f, "Invalid frame type"),
+            ParseError::InvalidChecksum => write!(f, "Invalid checksum"),
+            ParseError::InvalidFormat => write!(f, "Invalid format"),
+            ParseError::InvalidHeader => write!(f, "Invalid header"),
+            ParseError::VersionNotSupported => write!(f, "Version not supported"),
+        }
+    }
 }
 
 /// Represents the type of the frame
@@ -23,6 +37,38 @@ pub enum FrameType {
     Config2,
     Config3,
     Command,
+}
+impl fmt::Display for FrameType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FrameType::Data => write!(f, "IEEE Std C37.118 Data Frame"),
+            FrameType::Header => write!(f, "IEEE Std C37.118 Header Frame"),
+            FrameType::Config1 => write!(f, "IEEE Std C37.118 Configuration Frame 1"),
+            FrameType::Config2 => write!(f, "IEEE Std C37.118 Configuration Frame 2"),
+            FrameType::Config3 => write!(f, "IEEE Std C37.118 Configuration Frame 3"),
+            FrameType::Command => write!(f, "IEEE Std C37.118 Command Frame"),
+        }
+    }
+}
+
+// Define versions as an enum
+#[derive(Debug, PartialEq)]
+pub enum VersionStandard {
+    Ieee2005,  // Version 1: IEEE Std C37.118-2005
+    Ieee2011,  // Version 2: IEEE Std C37.118.2-2011
+    Ieee2024,  // Version 3: IEEE Std C37.118.3-2024
+    Other(u8), // For versions 4-15
+}
+// Implement Display for VersionStandard
+impl fmt::Display for VersionStandard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VersionStandard::Ieee2005 => write!(f, "IEEE Std C37.118-2005 (Version 1)"),
+            VersionStandard::Ieee2011 => write!(f, "IEEE Std C37.118.2-2011 (Version 2)"),
+            VersionStandard::Ieee2024 => write!(f, "IEEE Std C37.118.3-2024 (Version 3)"),
+            VersionStandard::Other(v) => write!(f, "Unknown Version {}", v),
+        }
+    }
 }
 
 /// Common trait for all frame types

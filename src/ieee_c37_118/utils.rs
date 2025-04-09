@@ -1,9 +1,11 @@
 // General functions for parsing IEEEC37.118 frames.
-//
+// Typically operate on buffers or bytes and return Enums or smaller results.
 // CHK - Cyclic Redundancy Check // If fragmented, last two bytes of last fragement contain the CHK.
 // CRC-CCITT implementation based on IEEE C37.118.2-2011 Appendix B
 
-use crate::ieee_c37_118::frames::{FrameType, ParseError};
+use super::ConfigurationFrame;
+use crate::ieee_c37_118::frames::{FrameType, ParseError, VersionStandard};
+use crate::ieee_c37_118::frames_v2::ConfigurationFrame1and2_2011;
 
 pub fn calculate_crc(buffer: &[u8]) -> u16 {
     let mut crc: u16 = 0xFFFF;
@@ -21,7 +23,7 @@ pub fn calculate_crc(buffer: &[u8]) -> u16 {
 }
 
 // Extract frame type from sync bytes
-pub fn get_frame_type(sync: u16) -> Result<FrameType, ParseError> {
+pub fn parse_frame_type(sync: u16) -> Result<FrameType, ParseError> {
     let frame_type_bits = (sync >> 4) & 0x7;
 
     match frame_type_bits {
@@ -35,9 +37,27 @@ pub fn get_frame_type(sync: u16) -> Result<FrameType, ParseError> {
     }
 }
 
-// Extract protocol version from sync bytes
-pub fn get_protocol_version(sync: u16) -> u8 {
-    (sync & 0xF) as u8
+pub fn parse_protocol_version(sync: u16) -> Result<VersionStandard, ParseError> {
+    // Extract second byte (low byte)
+    let second_byte = (sync & 0xFF) as u8;
+
+    // Check reserved bit (bit 7) is 0
+    if second_byte & 0x80 != 0 {
+        return Err(ParseError::InvalidHeader);
+    }
+
+    // Extract version (bits 3-0)
+    let version_bits = second_byte & 0x0F;
+    let version = match version_bits {
+        1 => VersionStandard::Ieee2005,
+        2 => VersionStandard::Ieee2011,
+        3 => VersionStandard::Ieee2024,
+        4..=15 => VersionStandard::Other(version_bits),
+        0 => return Err(ParseError::VersionNotSupported),
+        _ => unreachable!(), // Can't happen with 4 bits
+    };
+
+    Ok(version)
 }
 
 // Check if a buffer's checksum is valid
@@ -98,5 +118,50 @@ pub fn parse_phasor(
             let angle = imag_f.atan2(real_f);
             Ok((magnitude, angle))
         }
+    }
+}
+
+// Updated tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_frame() {
+        // AA41 = Data frame (000), Version 1 (0001)
+        assert_eq!(
+            parse_protocol_version(0xAA41).unwrap(),
+            VersionStandard::Ieee2005
+        );
+
+        // AA62 = Config1 frame (010), Version 2 (0010)
+        assert_eq!(
+            parse_protocol_version(0xAA62).unwrap(),
+            VersionStandard::Ieee2011
+        );
+
+        // AAB3 = Config3 frame (101), Version 3 (0011)
+        assert_eq!(
+            parse_protocol_version(0xAAB3).unwrap(),
+            VersionStandard::Ieee2024
+        );
+
+        // AA80 = Invalid (reserved bit 7 set)
+        assert!(matches!(
+            parse_frame_type(0xAA80),
+            Err(ParseError::InvalidHeader)
+        ));
+
+        // AA70 = Invalid frame type (111)
+        assert!(matches!(
+            parse_frame_type(0xAA70),
+            Err(ParseError::InvalidFrameType)
+        ));
+
+        // AA00 = Invalid version (0000)
+        assert!(matches!(
+            parse_frame_type(0xAA00),
+            Err(ParseError::VersionNotSupported)
+        ));
     }
 }

@@ -9,7 +9,7 @@ use crate::ieee_c37_118::frames_v2::{
     CommandFrame2011, ConfigurationFrame1and2_2011, DataFrame2011, PMUConfigurationFrame2011,
     PMUDataFrameFixedFreq2011, PMUDataFrameFloatFreq2011, PMUFrameType, PrefixFrame2011,
 };
-use crate::ieee_c37_118::utils::{calculate_crc, get_frame_type, validate_checksum};
+use crate::ieee_c37_118::utils::{calculate_crc, parse_frame_type, validate_checksum};
 use std::any::Any;
 use std::collections::HashMap;
 
@@ -66,7 +66,7 @@ impl PrefixFrame for PrefixFrame2011 {
     }
 
     fn frame_type(&self) -> FrameType {
-        get_frame_type(self.sync).unwrap_or(FrameType::Data)
+        parse_frame_type(self.sync).unwrap_or(FrameType::Data)
     }
 
     fn to_concrete_frame(&self) -> PrefixFrame2011 {

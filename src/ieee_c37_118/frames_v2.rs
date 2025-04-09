@@ -28,6 +28,7 @@ pub struct PrefixFrame2011 {
     // Bits 3-0: Version number in binary (1-15)
     // Version 1 (0001) for messages defined in IEEE Std C37.118-2005
     // Version 2 (0010) for messaged defined in IEEE STD C37.118.2-2011
+    // Version 3 (0011) for messages defind in IEEE STD C37.118.3-2024
     pub framesize: u16, // Total number of bytes in the frame including CHK
     pub idcode: u16,
     // Data stream id number

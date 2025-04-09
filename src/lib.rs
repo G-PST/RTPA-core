@@ -16,3 +16,5 @@ pub mod accumulator {
 pub mod ieee_c37_118;
 
 pub mod utils;
+
+pub mod pdc_buffer;

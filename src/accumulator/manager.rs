@@ -264,6 +264,17 @@ impl AccumulatorManager {
             batch_size,
         )
     }
+    pub fn duplicate(&self) -> Self {
+        // Create a new instance with the same configuration
+        let new_manager = AccumulatorManager::new_with_params(
+            self.configs.clone(),
+            self.num_threads,
+            self.max_batches,
+            self.buffer_size,
+            self.batch_size,
+        );
+        new_manager
+    }
 
     pub fn process_buffer<F>(&self, writer: F) -> Result<(), String>
     where

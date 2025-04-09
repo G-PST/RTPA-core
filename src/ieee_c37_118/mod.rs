@@ -17,29 +17,46 @@ mod tests;
 // Re-export version-agnostic interfaces
 pub use frames::{
     CommandFrame, ConfigurationFrame, DataFrame, Frame, FrameType, ParseError, PrefixFrame,
+    VersionStandard,
 };
 
 // Factory functions to create the appropriate frame based on protocol version
-pub fn create_configuration_frame(bytes: &[u8]) -> Result<Box<dyn ConfigurationFrame>, ParseError> {
+pub fn parse_configuration_frame(bytes: &[u8]) -> Result<Box<dyn ConfigurationFrame>, ParseError> {
     if bytes.len() < 2 {
         return Err(ParseError::InvalidLength);
     }
 
     let sync = u16::from_be_bytes([bytes[0], bytes[1]]);
-    let version = utils::get_protocol_version(sync);
+    let frame_type = utils::parse_frame_type(sync).unwrap();
+    let version = utils::parse_protocol_version(sync).unwrap();
 
+    // fail early on frame type
+    if frame_type != FrameType::Config1
+        && frame_type != FrameType::Config2
+        && frame_type != FrameType::Config3
+    {
+        return Err(ParseError::InvalidFrameType);
+    }
     // Protocol version should be 2 for IEEE C37.118.2-2011
     // If it's not, we need to adjust our logic
     match version {
-        2 => <frames_v2::ConfigurationFrame1and2_2011 as ConfigurationFrame>::from_bytes(bytes)
-            .map(|frame| Box::new(frame) as Box<dyn ConfigurationFrame>),
+        VersionStandard::Ieee2011 => {
+            <frames_v2::ConfigurationFrame1and2_2011 as ConfigurationFrame>::from_bytes(bytes)
+                .map(|frame| Box::new(frame) as Box<dyn ConfigurationFrame>)
+        }
         // Temporary workaround - if version is not 2, try version 2 anyway
-        _ => <frames_v2::ConfigurationFrame1and2_2011 as ConfigurationFrame>::from_bytes(bytes)
-            .map(|frame| Box::new(frame) as Box<dyn ConfigurationFrame>),
+        _ => {
+            println!(
+                "Protocol not currently supported falling back to version 2: {}",
+                version
+            );
+            <frames_v2::ConfigurationFrame1and2_2011 as ConfigurationFrame>::from_bytes(bytes)
+                .map(|frame| Box::new(frame) as Box<dyn ConfigurationFrame>)
+        }
     }
 }
 
-pub fn create_command_frame(bytes: &[u8]) -> Result<Box<dyn CommandFrame>, ParseError> {
+pub fn parse_command_frame(bytes: &[u8]) -> Result<Box<dyn CommandFrame>, ParseError> {
     if bytes.len() < 2 {
         println!(
             "Error: Command frame buffer too short: {} bytes",
@@ -49,11 +66,11 @@ pub fn create_command_frame(bytes: &[u8]) -> Result<Box<dyn CommandFrame>, Parse
     }
 
     let sync = u16::from_be_bytes([bytes[0], bytes[1]]);
-    let version = utils::get_protocol_version(sync);
+    let version = utils::parse_protocol_version(sync).unwrap();
     println!("Command frame: sync=0x{:04X}, version={}", sync, version);
 
     match version {
-        1 | 2 => {
+        VersionStandard::Ieee2005 | VersionStandard::Ieee2011 => {
             // Try to parse as CommandFrame2011
             match <frames_v2::CommandFrame2011 as CommandFrame>::from_bytes(bytes) {
                 Ok(frame) => Ok(Box::new(frame) as Box<dyn CommandFrame>),
@@ -79,12 +96,21 @@ pub fn create_command_frame(bytes: &[u8]) -> Result<Box<dyn CommandFrame>, Parse
         }
         _ => {
             println!("Unsupported protocol version: {}", version);
-            Err(ParseError::InvalidFrameType)
+            Err(ParseError::VersionNotSupported)
         }
     }
 }
 
-pub fn create_data_frame(
+pub fn serialize_command(command_type: String, version: VersionStandard, id_code: u16) -> Vec<u8> {
+    // We need a way to create a serialized command frame
+    // based on which type of command we want to send. e.g. send configuration frame 2.
+    // or start/stop transmission
+    !todo!();
+    let mut bytes = Vec::new();
+    bytes
+}
+
+pub fn parse_data_frame(
     bytes: &[u8],
     config: &dyn ConfigurationFrame,
 ) -> Result<Box<dyn DataFrame>, ParseError> {
@@ -93,14 +119,14 @@ pub fn create_data_frame(
     }
 
     let sync = u16::from_be_bytes([bytes[0], bytes[1]]);
-    let version = utils::get_protocol_version(sync);
+    let version = utils::parse_protocol_version(sync).unwrap();
 
     match version {
-        1 | 2 => {
+        VersionStandard::Ieee2005 | VersionStandard::Ieee2011 => {
             // Use fully qualified path for the implementation
             <frames_v2::DataFrame2011 as DataFrame>::from_bytes(bytes, config)
                 .map(|frame| Box::new(frame) as Box<dyn DataFrame>)
         }
-        _ => Err(ParseError::InvalidFrameType),
+        _ => Err(ParseError::VersionNotSupported),
     }
 }

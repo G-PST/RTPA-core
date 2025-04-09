@@ -16,7 +16,7 @@ use std::fs;
 use std::path::Path;
 
 use rtpa_core::accumulator::manager::AccumulatorManager;
-use rtpa_core::ieee_c37_118::create_configuration_frame;
+use rtpa_core::ieee_c37_118::parse_configuration_frame;
 use rtpa_core::utils::config_to_accumulators;
 
 // Helper function to read test data files
@@ -50,7 +50,7 @@ fn test_ieee_c37_118_e2e() {
     // Step 1: Parse the config frame from test data
     let config_buffer = read_hex_file("config_message.bin").expect("Failed to read config file");
     let config_frame =
-        create_configuration_frame(&config_buffer).expect("Failed to parse configuration frame");
+        parse_configuration_frame(&config_buffer).expect("Failed to parse configuration frame");
 
     // Get the channel map from the config frame
     let channel_map = config_frame.get_channel_map();

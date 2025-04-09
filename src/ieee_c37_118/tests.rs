@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn test_create_command_frame() {
         let buffer = read_hex_file("cmd_message.bin").unwrap();
-        let result = crate::ieee_c37_118::create_command_frame(&buffer);
+        let result = crate::ieee_c37_118::parse_command_frame(&buffer);
 
         assert!(result.is_ok(), "Failed to create command frame");
         let command_frame = result.unwrap();
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn test_create_configuration_frame() {
         let buffer = read_hex_file("config_message.bin").unwrap();
-        let result = crate::ieee_c37_118::create_configuration_frame(&buffer);
+        let result = crate::ieee_c37_118::parse_configuration_frame(&buffer);
 
         assert!(result.is_ok(), "Failed to create configuration frame");
         let config_frame = result.unwrap();
@@ -131,7 +131,7 @@ mod tests {
     fn test_create_data_frame() {
         // First get the config frame
         let config_buffer = read_hex_file("config_message.bin").unwrap();
-        let config_result = crate::ieee_c37_118::create_configuration_frame(&config_buffer);
+        let config_result = crate::ieee_c37_118::parse_configuration_frame(&config_buffer);
         assert!(
             config_result.is_ok(),
             "Failed to create configuration frame"
@@ -140,7 +140,7 @@ mod tests {
 
         // Now test the data frame
         let data_buffer = read_hex_file("data_message.bin").unwrap();
-        let result = crate::ieee_c37_118::create_data_frame(&data_buffer, config_frame.as_ref());
+        let result = crate::ieee_c37_118::parse_data_frame(&data_buffer, config_frame.as_ref());
 
         assert!(result.is_ok(), "Failed to create data frame");
         let data_frame = result.unwrap();
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn test_parse_config_frame() {
         let buffer = read_hex_file("config_message.bin").unwrap();
-        let result = crate::ieee_c37_118::create_configuration_frame(&buffer);
+        let result = crate::ieee_c37_118::parse_configuration_frame(&buffer);
 
         assert!(result.is_ok(), "Failed to parse configuration frame");
 
@@ -202,7 +202,7 @@ mod tests {
     fn test_pmu_config_serialization() {
         // Create a sample PMU configuration
         let config_buffer = read_hex_file("config_message.bin").unwrap();
-        let config_frame = crate::ieee_c37_118::create_configuration_frame(&config_buffer).unwrap();
+        let config_frame = crate::ieee_c37_118::parse_configuration_frame(&config_buffer).unwrap();
         let concrete_frame = config_frame
             .as_any()
             .downcast_ref::<ConfigurationFrame1and2_2011>()
