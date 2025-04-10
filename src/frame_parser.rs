@@ -300,8 +300,10 @@ pub fn parse_frame(
     // if bits 3-0 do not equal 0010, throw ParseError:VersionNotSupported
     println!("Reading Frame Prefix");
     let sync = u16::from_be_bytes([buffer[0], buffer[1]]);
+
     if sync >> 8 != 0xAA {
-        println!("Invalid Sync value");
+        let sync_slice = &buffer[0..2];
+        println!("MOCK PDC: Invalid Sync value {:02X?}", sync_slice);
         return Err(ParseError::InvalidHeader);
     }
     println!("Reading version");

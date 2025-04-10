@@ -90,7 +90,7 @@ fn update_frame_timestamp(frame: &mut Vec<u8>) {
 }
 
 async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) -> io::Result<()> {
-    println!("Handling client");
+    println!("MOCK PDC: Handling client");
     let mut is_streaming = false;
     let stream_interval = Duration::from_secs_f64(1.0 / config.data_rate);
 
@@ -115,43 +115,43 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
                                 Frame::Command(cmd) => {
                                     match cmd.command {
                                         4 => { // Send config frame
-                                            println!("Received command: Send configuration frame");
+                                            println!("MOCK PDC: Received command: Send configuration frame");
                                             match read_test_file("config_message.bin") {
                                                 Ok(config_data) => {
                                                     socket.write_all(&config_data).await?;
                                                 },
                                                 Err(e) => {
-                                                    println!("Error reading config file: {}", e);
+                                                    println!("MOCK PDC: Error reading config file: {}", e);
                                                 }
                                             }
                                         },
                                         2 => { // Start data transmission
-                                            println!("Received command: Start data transmission");
+                                            println!("MOCK PDC: Received command: Start data transmission");
                                             is_streaming = true;
                                         },
                                         1 => { // Stop data transmission
-                                            println!("Received command: Stop data transmission");
+                                            println!("MOCK PDC: Received command: Stop data transmission");
                                             is_streaming = false;
                                         },
                                         _ => {
-                                            println!("Received unknown command: {}", cmd.command);
+                                            println!("MOCK PDC: Received unknown command: {}", cmd.command);
                                         }
                                     }
                                 },
-                                _ => println!("Received non-command frame"),
+                                _ => println!("MOCK PDC: Received non-command frame"),
                             }
                         }
                     },
                     Ok(0) => {
-                        println!("Client disconnected");
+                        println!("MOCK PDC: Client disconnected");
                         break;
                     },
                     Err(e) => {
-                        println!("Error reading from socket: {}", e);
+                        println!("MOCK PDC: Error reading from socket: {}", e);
                         break;
                     },
                     Ok(1_usize..)=>{
-                        println!("Internal Error");
+                        println!("MOCK PDC: Internal Error");
                         break;
                     }
                 }
@@ -162,7 +162,7 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
                 update_frame_timestamp(&mut frame_to_send);
 
                 if let Err(e) = socket.write_all(&frame_to_send).await {
-                    println!("Error sending data frame: {}", e);
+                    println!("MOCK PDC: Error sending data frame: {}", e);
                     break;
                 }
             }
@@ -175,14 +175,17 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
 pub async fn run_mock_server(server_config: ServerConfig) -> io::Result<()> {
     let listener = TcpListener::bind(&server_config.address).await?;
     println!("Mock PDC server listening on {}", server_config.address);
-    println!("Data rate configured to {} Hz", server_config.data_rate);
+    println!(
+        "Mock PDC Data rate configured to {} Hz",
+        server_config.data_rate
+    );
 
     while let Ok((socket, addr)) = listener.accept().await {
-        println!("New client connected: {}", addr);
+        println!("MOCK PDC: New client connected: {}", addr);
         let config = server_config.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_client(socket, config).await {
-                println!("Client handler error: {}", e);
+                println!("MOCK PDC: Client handler error: {}", e);
             }
         });
     }

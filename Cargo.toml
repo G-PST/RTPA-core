@@ -22,7 +22,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 core_affinity = "0.8.3"
 rayon = "1.10.0"
-pyo3 = "0.24.1"
+pyo3 = { version = "0.20", features = ["extension-module"] }
+polars = "0.46.0"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
@@ -45,3 +46,7 @@ harness = false
 [[test]]
 name = "e2e_test"
 path = "tests/e2e_test.rs"
+
+[[test]]
+name = "integration_test"
+path = "tests/pdc_buffer_test.rs"

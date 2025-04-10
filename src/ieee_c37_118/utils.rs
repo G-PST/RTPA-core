@@ -4,8 +4,9 @@
 // CRC-CCITT implementation based on IEEE C37.118.2-2011 Appendix B
 
 use super::ConfigurationFrame;
-use crate::ieee_c37_118::frames::{FrameType, ParseError, VersionStandard};
+use crate::ieee_c37_118::frames::{FrameType, ParseError};
 use crate::ieee_c37_118::frames_v2::ConfigurationFrame1and2_2011;
+use crate::ieee_c37_118::VersionStandard;
 
 pub fn calculate_crc(buffer: &[u8]) -> u16 {
     let mut crc: u16 = 0xFFFF;

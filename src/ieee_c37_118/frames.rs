@@ -51,26 +51,6 @@ impl fmt::Display for FrameType {
     }
 }
 
-// Define versions as an enum
-#[derive(Debug, PartialEq)]
-pub enum VersionStandard {
-    Ieee2005,  // Version 1: IEEE Std C37.118-2005
-    Ieee2011,  // Version 2: IEEE Std C37.118.2-2011
-    Ieee2024,  // Version 3: IEEE Std C37.118.3-2024
-    Other(u8), // For versions 4-15
-}
-// Implement Display for VersionStandard
-impl fmt::Display for VersionStandard {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            VersionStandard::Ieee2005 => write!(f, "IEEE Std C37.118-2005 (Version 1)"),
-            VersionStandard::Ieee2011 => write!(f, "IEEE Std C37.118.2-2011 (Version 2)"),
-            VersionStandard::Ieee2024 => write!(f, "IEEE Std C37.118.3-2024 (Version 3)"),
-            VersionStandard::Other(v) => write!(f, "Unknown Version {}", v),
-        }
-    }
-}
-
 /// Common trait for all frame types
 pub trait Frame {
     /// Get the frame type

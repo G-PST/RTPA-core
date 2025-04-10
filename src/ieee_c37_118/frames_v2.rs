@@ -89,6 +89,7 @@ impl CommandFrame2011 {
     }
 
     pub fn new_turn_on_transmission(idcode: u16) -> Self {
+        println!("Creating start transmission command");
         Self::new_command(idcode, 2)
     }
 
@@ -101,7 +102,7 @@ impl CommandFrame2011 {
     }
 
     pub fn new_send_config_frame2(idcode: u16) -> Self {
-        Self::new_command(idcode, 5)
+        Self::new_command(idcode, 4)
     }
 
     pub fn new_send_config_frame3(idcode: u16) -> Self {

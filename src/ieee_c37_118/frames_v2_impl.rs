@@ -113,6 +113,10 @@ impl ConfigurationFrame for ConfigurationFrame1and2_2011 {
 
         if bytes.len() < PREFIX_SIZE + 6 {
             // Prefix + time_base + num_pmu
+            println!(
+                "Error: Configurationframe buffer too short: {} bytes",
+                bytes.len()
+            );
             return Err(ParseError::InvalidLength);
         }
         // Extract the prefix
@@ -121,6 +125,10 @@ impl ConfigurationFrame for ConfigurationFrame1and2_2011 {
         // Validate frame size and checksum
         let framesize = u16::from_be_bytes([bytes[2], bytes[3]]);
         if framesize as usize != bytes.len() {
+            println!(
+                "Error: Configurationframe buffer does not match expected size: {} bytes received, expected {} bytes",
+                bytes.len(), framesize
+            );
             return Err(ParseError::InvalidLength);
         }
 

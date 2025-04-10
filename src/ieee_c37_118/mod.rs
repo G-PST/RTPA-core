@@ -1,5 +1,5 @@
 #![allow(unused)]
-
+use std::fmt;
 // Public modules
 pub mod frames;
 pub mod models;
@@ -17,12 +17,44 @@ mod tests;
 // Re-export version-agnostic interfaces
 pub use frames::{
     CommandFrame, ConfigurationFrame, DataFrame, Frame, FrameType, ParseError, PrefixFrame,
-    VersionStandard,
 };
+
+pub enum Command {
+    StartStream,
+    StopStream,
+    SendConfig1,
+    SendConfig2,
+    SendConfig3,
+    SendHeader,
+}
+
+// Define versions as an enum
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum VersionStandard {
+    Ieee2005,  // Version 1: IEEE Std C37.118-2005
+    Ieee2011,  // Version 2: IEEE Std C37.118.2-2011
+    Ieee2024,  // Version 3: IEEE Std C37.118.3-2024
+    Other(u8), // For versions 4-15
+}
+// Implement Display for VersionStandard
+impl fmt::Display for VersionStandard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VersionStandard::Ieee2005 => write!(f, "IEEE Std C37.118-2005 (Version 1)"),
+            VersionStandard::Ieee2011 => write!(f, "IEEE Std C37.118.2-2011 (Version 2)"),
+            VersionStandard::Ieee2024 => write!(f, "IEEE Std C37.118.3-2024 (Version 3)"),
+            VersionStandard::Other(v) => write!(f, "Unknown Version {}", v),
+        }
+    }
+}
 
 // Factory functions to create the appropriate frame based on protocol version
 pub fn parse_configuration_frame(bytes: &[u8]) -> Result<Box<dyn ConfigurationFrame>, ParseError> {
     if bytes.len() < 2 {
+        println!(
+            "Error: Configuration frame buffer too short: {} bytes",
+            bytes.len()
+        );
         return Err(ParseError::InvalidLength);
     }
 
@@ -101,13 +133,48 @@ pub fn parse_command_frame(bytes: &[u8]) -> Result<Box<dyn CommandFrame>, ParseE
     }
 }
 
-pub fn serialize_command(command_type: String, version: VersionStandard, id_code: u16) -> Vec<u8> {
-    // We need a way to create a serialized command frame
-    // based on which type of command we want to send. e.g. send configuration frame 2.
-    // or start/stop transmission
-    !todo!();
-    let mut bytes = Vec::new();
-    bytes
+pub fn serialize_command(command_type: Command, version: VersionStandard, id_code: u16) -> Vec<u8> {
+    // Match version first to determine which implementation to use
+    match version {
+        VersionStandard::Ieee2011 => {
+            // Map our Command enum to the appropriate constructor in frames_v2::CommandFrame2011
+            let command_frame = match command_type {
+                Command::StartStream => {
+                    frames_v2::CommandFrame2011::new_turn_on_transmission(id_code)
+                }
+                Command::StopStream => {
+                    frames_v2::CommandFrame2011::new_turn_off_transmission(id_code)
+                }
+                Command::SendHeader => frames_v2::CommandFrame2011::new_send_header_frame(id_code),
+                Command::SendConfig1 => {
+                    frames_v2::CommandFrame2011::new_send_config_frame1(id_code)
+                }
+                Command::SendConfig2 => {
+                    frames_v2::CommandFrame2011::new_send_config_frame2(id_code)
+                }
+                Command::SendConfig3 => {
+                    frames_v2::CommandFrame2011::new_send_config_frame3(id_code)
+                }
+            };
+
+            // Set the current time for the command
+            // Note: In a real implementation, we may want to allow the caller to specify the time
+            // or set it just before sending to ensure accuracy
+            let mut bytes = command_frame.to_bytes();
+
+            // Return the serialized bytes
+            bytes
+        }
+        // For other versions, we would implement similar logic with different frame types
+        _ => {
+            // For now, just return an empty vector since these versions aren't supported yet
+            println!(
+                "Warning: Version {:?} not supported, returning empty command",
+                version
+            );
+            Vec::new()
+        }
+    }
 }
 
 pub fn parse_data_frame(
