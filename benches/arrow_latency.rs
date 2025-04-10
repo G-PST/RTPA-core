@@ -92,7 +92,7 @@ fn bench_get_dataframe(c: &mut Criterion) {
 
                 // Benchmark only the dataframe creation
                 b.iter(|| {
-                    black_box(manager.get_dataframe(&columns, 60).unwrap());
+                    black_box(manager._get_dataframe(&columns, 60).unwrap());
                 });
 
                 manager.shutdown();
@@ -142,7 +142,7 @@ fn bench_time_window(c: &mut Criterion) {
 
                 // Benchmark only the dataframe creation with different window sizes
                 b.iter(|| {
-                    black_box(manager.get_dataframe(&columns, window).unwrap());
+                    black_box(manager._get_dataframe(&columns, window).unwrap());
                 });
 
                 manager.shutdown();
@@ -221,7 +221,7 @@ fn bench_thread_count(c: &mut Criterion) {
 
                 // Benchmark only the dataframe creation
                 b.iter(|| {
-                    black_box(manager.get_dataframe(&columns, 5).unwrap());
+                    black_box(manager._get_dataframe(&columns, 5).unwrap());
                 });
 
                 manager.shutdown();
@@ -279,7 +279,7 @@ fn bench_ultimate_test(c: &mut Criterion) {
 
         // Only benchmark the dataframe creation
         b.iter(|| {
-            black_box(manager.get_dataframe(&columns, 120).unwrap());
+            black_box(manager._get_dataframe(&columns, 120).unwrap());
         });
 
         manager.shutdown();
@@ -325,7 +325,7 @@ fn bench_column_count(c: &mut Criterion) {
 
                 // Benchmark only the dataframe creation
                 b.iter(|| {
-                    black_box(manager.get_dataframe(&columns, 5).unwrap());
+                    black_box(manager._get_dataframe(&columns, 5).unwrap());
                 });
 
                 manager.shutdown();

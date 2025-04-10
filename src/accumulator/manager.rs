@@ -1,3 +1,5 @@
+//use super::manager_trait::DataManager;
+
 use super::sparse::{
     Accumulate, Accumulator, C37118TimestampAccumulator, F32Accumulator, I16Accumulator,
     I32Accumulator, U16Accumulator,
@@ -10,8 +12,8 @@ use core_affinity;
 use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::mpsc::{channel, Sender};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -36,8 +38,8 @@ pub struct AccumulatorManager {
     input_buffer: Arc<RwLock<Vec<u8>>>,
     written_bytes: Arc<RwLock<usize>>,
     shutdown: Arc<AtomicBool>,
-    work_senders: Vec<Sender<()>>,     // Signal work to threads
-    completion_receiver: Receiver<()>, // Receive completion signals            // Ensure threads are ready
+    work_senders: Vec<Sender<()>>, // Signal work to threads
+    completion_count: Arc<(Mutex<usize>, Condvar)>, // Count completed threads
     threads: Vec<JoinHandle<()>>,
     batch_index: Arc<RwLock<usize>>,
     max_batches: usize,
@@ -115,19 +117,30 @@ impl AccumulatorManager {
         let records: Arc<Mutex<VecDeque<(u64, RecordBatch)>>> =
             Arc::new(Mutex::new(VecDeque::with_capacity(max_batches)));
 
-        let (completion_sender, completion_receiver) = channel();
+        // Create thread synchronization mechanisms
+        let completion_count = Arc::new((Mutex::new(0), Condvar::new()));
         let mut work_senders = Vec::new();
         let mut threads = Vec::new();
 
-        let core_ids = core_affinity::get_core_ids().unwrap();
-        assert!(
-            num_threads <= core_ids.len(),
-            "Too many threads for available cores"
-        );
+        let core_ids = core_affinity::get_core_ids().unwrap_or_else(|| {
+            (0..num_threads)
+                .map(|_| core_affinity::CoreId { id: 0 })
+                .collect()
+        });
 
-        let accumulators_per_thread = (valid_configs.len() + num_threads - 1) / num_threads;
+        let num_cores = core_ids.len();
+        let actual_threads = std::cmp::min(num_threads, num_cores);
 
-        for i in 0..num_threads {
+        if actual_threads < num_threads {
+            println!(
+                "WARNING: Requested {} threads but only {} cores available",
+                num_threads, num_cores
+            );
+        }
+
+        let accumulators_per_thread = (valid_configs.len() + actual_threads - 1) / actual_threads;
+
+        for i in 0..actual_threads {
             let core_id = core_ids[i];
             let start_idx = i * accumulators_per_thread;
             let end_idx = std::cmp::min(start_idx + accumulators_per_thread, valid_configs.len());
@@ -141,14 +154,12 @@ impl AccumulatorManager {
             // Clone the shared resources for this thread
             let input_buffer_clone = input_buffer.clone();
             let written_bytes_clone = written_bytes.clone();
-            let _batch_index_clone = batch_index.clone();
             let shutdown_clone = shutdown.clone();
-            let completion_sender = completion_sender.clone();
+            let completion_count_clone = completion_count.clone();
             let (work_sender, work_receiver) = channel();
-            let _thread_batch_size = batch_size;
 
             let handle = thread::spawn(move || {
-                core_affinity::set_for_current(core_id);
+                let _ = core_affinity::set_for_current(core_id);
                 let accumulators: Vec<Accumulator> = thread_configs
                     .iter()
                     .map(|config| match (config.var_type.clone(), config.var_len) {
@@ -190,7 +201,11 @@ impl AccumulatorManager {
                                 }
                             }
 
-                            completion_sender.send(()).unwrap();
+                            // Signal completion by incrementing the counter
+                            let (count_mutex, cvar) = &*completion_count_clone;
+                            let mut count = count_mutex.lock().unwrap();
+                            *count += 1;
+                            cvar.notify_all();
                         }
                         Err(_) => break, // Channel closed, shutdown
                     }
@@ -210,11 +225,11 @@ impl AccumulatorManager {
             written_bytes,
             shutdown,
             work_senders,
-            completion_receiver,
+            completion_count,
             threads,
             batch_index,
             max_batches,
-            num_threads,
+            num_threads: actual_threads,
             buffer_size,
             batch_size,
         }
@@ -264,6 +279,7 @@ impl AccumulatorManager {
             batch_size,
         )
     }
+
     pub fn duplicate(&self) -> Self {
         // Create a new instance with the same configuration
         let new_manager = AccumulatorManager::new_with_params(
@@ -299,17 +315,15 @@ impl AccumulatorManager {
             return Err("No data written to buffer".to_string());
         }
 
-        // Check if the input buffer is filled to the expected length
-        if written != self.buffer_size {
-            println!(
-                "WARNING: Input buffer not filled to expected size. Expected {}, got {}",
-                self.buffer_size, written
-            );
-            return Err("Input buffer must be filled to the full buffer size".to_string());
-        }
-
         // Update written bytes atomically
         *self.written_bytes.write().unwrap() = written;
+
+        // Reset completion counter
+        {
+            let (count_mutex, _) = &*self.completion_count;
+            let mut count = count_mutex.lock().unwrap();
+            *count = 0;
+        }
 
         // Signal all worker threads
         for sender in &self.work_senders {
@@ -319,25 +333,25 @@ impl AccumulatorManager {
             }
         }
 
-        // Use a timeout and counter to detect partial completions
-        let mut completed_threads = 0;
+        // Wait for all threads to complete using condition variable
         let timeout = Duration::from_secs(1); // 1 second timeout per thread
+        {
+            let (count_mutex, cvar) = &*self.completion_count;
+            let mut count = count_mutex.lock().unwrap();
 
-        while completed_threads < self.work_senders.len() {
-            match self.completion_receiver.recv_timeout(timeout) {
-                Ok(()) => {
-                    completed_threads += 1;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            while *count < self.work_senders.len() {
+                let result = cvar.wait_timeout(count, timeout).unwrap();
+                count = result.0;
+
+                if result.1.timed_out() {
                     println!(
                         "WARNING: Timeout waiting for thread completions, got {}/{}",
-                        completed_threads,
+                        *count,
                         self.work_senders.len()
                     );
                     // Continue anyway - this prevents permanent deadlock
                     break;
                 }
-                Err(e) => return Err(format!("Channel error: {}", e)),
             }
         }
 
@@ -482,6 +496,32 @@ impl AccumulatorManager {
 
     pub fn get_dataframe(
         &self,
+        columns: Option<Vec<&str>>, // Optional list of column names
+        window_secs: Option<u64>,   // Optional time window in seconds
+    ) -> Result<RecordBatch, String> {
+        // Resolve column names to indices
+        let column_indices = match columns {
+            Some(col_names) => {
+                let schema = self.schema.as_ref();
+                col_names
+                    .into_iter()
+                    .map(|name| {
+                        schema
+                            .index_of(name)
+                            .map_err(|e| format!("Column '{}' not found in schema: {}", name, e))
+                    })
+                    .collect::<Result<Vec<usize>, String>>()?
+            }
+            None => (0..self.schema.fields().len()).collect(), // Default to all columns
+        };
+
+        // Use the original get_dataframe method with the resolved indices
+        // Pass window_secs as-is (None will be handled by the original method if needed)
+        self._get_dataframe(&column_indices, window_secs.unwrap_or(u64::MAX))
+    }
+
+    pub fn _get_dataframe(
+        &self,
         columns: &[usize],
         window_secs: u64,
     ) -> Result<RecordBatch, String> {
@@ -494,37 +534,45 @@ impl AccumulatorManager {
         {
             let idx = *self.batch_index.read().unwrap();
             if idx > 0 {
-                self.save_batch();
-                *self.batch_index.write().unwrap() = 0;
-            }
-            if idx > 0 && *self.written_bytes.read().unwrap() > 0 {
-                // Signal all threads to process the current buffer
-                for sender in &self.work_senders {
-                    sender
-                        .send(())
-                        .map_err(|e| format!("Failed to signal thread for flush: {}", e))?;
-                }
-
-                // Wait for all threads to complete
-                for i in 0..self.num_threads {
-                    match self
-                        .completion_receiver
-                        .recv_timeout(Duration::from_secs(5))
+                let bytes = *self.written_bytes.read().unwrap();
+                if bytes > 0 {
+                    // Reset completion counter
                     {
-                        Ok(()) => {}
-                        Err(_) => {
-                            return Err(format!(
-                                "Deadlock detected in get_dataframe flush: only {}/{} threads completed",
-                                i, self.num_threads
-                            ));
+                        let (count_mutex, _) = &*self.completion_count;
+                        let mut count = count_mutex.lock().unwrap();
+                        *count = 0;
+                    }
+
+                    // Signal all threads to process the current buffer
+                    for sender in &self.work_senders {
+                        sender
+                            .send(())
+                            .map_err(|e| format!("Failed to signal thread for flush: {}", e))?;
+                    }
+
+                    // Wait for all threads to complete using condition variable
+                    {
+                        let (count_mutex, cvar) = &*self.completion_count;
+                        let mut count = count_mutex.lock().unwrap();
+
+                        while *count < self.num_threads {
+                            let result = cvar.wait_timeout(count, Duration::from_secs(5)).unwrap();
+                            count = result.0;
+
+                            if result.1.timed_out() {
+                                return Err(format!(
+                                    "Deadlock detected in get_dataframe flush: only {}/{} threads completed",
+                                    *count, self.num_threads
+                                ));
+                            }
                         }
                     }
-                }
 
-                // Save the partial batch and reset state
-                self.save_batch();
-                *self.batch_index.write().unwrap() = 0;
-                *self.written_bytes.write().unwrap() = 0;
+                    // Save the partial batch and reset state
+                    self.save_batch();
+                    *self.batch_index.write().unwrap() = 0;
+                    *self.written_bytes.write().unwrap() = 0;
+                }
             }
         }
 
@@ -554,6 +602,8 @@ impl AccumulatorManager {
                     }
                     DataType::Int32 => Arc::new(Int32Array::from(Vec::<i32>::new())) as ArrayRef,
                     DataType::UInt16 => Arc::new(UInt16Array::from(Vec::<u16>::new())) as ArrayRef,
+                    DataType::Int16 => Arc::new(Int16Array::from(Vec::<i16>::new())) as ArrayRef,
+                    DataType::Int64 => Arc::new(Int64Array::from(Vec::<i64>::new())) as ArrayRef,
                     dt => panic!("Unsupported data type: {:?}", dt),
                 })
                 .collect();
@@ -619,6 +669,12 @@ impl AccumulatorManager {
                         }
                         DataType::UInt16 => {
                             Arc::new(UInt16Array::from(Vec::<u16>::new())) as ArrayRef
+                        }
+                        DataType::Int16 => {
+                            Arc::new(Int16Array::from(Vec::<i16>::new())) as ArrayRef
+                        }
+                        DataType::Int64 => {
+                            Arc::new(Int64Array::from(Vec::<i64>::new())) as ArrayRef
                         }
                         _ => panic!("Unsupported data type: {:?}", data_type),
                     }

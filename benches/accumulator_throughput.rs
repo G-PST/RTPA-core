@@ -213,7 +213,7 @@ fn bench_concurrent_operations(c: &mut Criterion) {
 
                         // Query data every 10 processing operations
                         if process_count % 10 == 0 {
-                            let _ = manager.get_dataframe(&columns, 5).unwrap();
+                            let _ = manager._get_dataframe(&columns, 5).unwrap();
                         }
                     }
 

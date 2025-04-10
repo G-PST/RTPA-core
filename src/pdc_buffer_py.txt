@@ -1,0 +1,71 @@
+#[allow(unused)]
+use super::pdc_buffer::PDCBuffer;
+//use arrow_ipc;
+use pyo3::prelude::*;
+
+#[pyclass]
+pub struct PDCBufferPy {
+    inner: Option<PDCBuffer>,
+}
+
+#[pymethods]
+impl PDCBufferPy {
+    #[new]
+    fn new() -> Self {
+        // Don't create the PDCBuffer right away to avoid thread-safety issues
+        PDCBufferPy { inner: None }
+    }
+
+    fn connect(&mut self, ip_addr: String, port: u16, id_code: u16) -> PyResult<()> {
+        self.inner = Some(PDCBuffer::new(ip_addr, port, id_code, None));
+        Ok(())
+    }
+
+    fn start_stream(&mut self) -> PyResult<()> {
+        match &mut self.inner {
+            Some(buffer) => {
+                buffer.start_stream();
+                Ok(())
+            }
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Not connected. Call connect() first",
+            )),
+        }
+    }
+
+    fn stop_stream(&mut self) -> PyResult<()> {
+        match &mut self.inner {
+            Some(buffer) => {
+                buffer.stop_stream();
+                Ok(())
+            }
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Not connected. Call connect() first",
+            )),
+        }
+    }
+
+    fn list_pmus(&self) -> PyResult<Vec<String>> {
+        match &self.inner {
+            Some(buffer) => Ok(buffer.list_pmus()),
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Not connected. Call connect() first",
+            )),
+        }
+    }
+
+    fn list_channels(&self) -> PyResult<Vec<String>> {
+        match &self.inner {
+            Some(buffer) => Ok(buffer.list_channels()),
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Not connected. Call connect() first",
+            )),
+        }
+    }
+}
+
+#[pymodule]
+fn rtpa_core(py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<PDCBufferPy>()?;
+    Ok(())
+}

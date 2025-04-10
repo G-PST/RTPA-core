@@ -6,9 +6,12 @@
 //
 // The module should be structured in a way that it can be imported as a python module.
 //
+#[allow(unused)]
+#[allow(unused_variables)]
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+
 use std::thread::{self, JoinHandle};
 
 use arrow::record_batch::RecordBatch;
@@ -24,13 +27,13 @@ use crate::utils::config_to_accumulators;
 const DEFAULT_STANDARD: VersionStandard = VersionStandard::Ieee2011;
 
 pub struct PDCBuffer {
-    ip_addr: String,
-    port: u16,
-    id_code: u16,
+    pub ip_addr: String,
+    pub port: u16,
+    pub id_code: u16,
     _accumulators: Vec<AccumulatorConfig>,
     _accumulator_manager: AccumulatorManager, // Thread safe manager.
-    _ieee_version: VersionStandard,           // The ieee standard version 1&2 or 3
-    _config_frame: Box<dyn ConfigurationFrame>, // The configuration frame of the PDC
+    pub ieee_version: VersionStandard,        // The ieee standard version 1&2 or 3
+    pub config_frame: Box<dyn ConfigurationFrame>, // The configuration frame of the PDC
     _batch_size: usize,
     _channels: Vec<String>,
     _pmus: Vec<String>,
@@ -113,6 +116,7 @@ impl PDCBuffer {
         // TODO, this needs to be updated to use new_with_params()
 
         let accumulators = config_to_accumulators(&*config_frame);
+
         let accumulator_manager = AccumulatorManager::new_with_params(
             accumulators.clone(),
             2,
@@ -130,8 +134,8 @@ impl PDCBuffer {
             id_code,
             _accumulators: accumulators,
             _accumulator_manager: accumulator_manager,
-            _ieee_version: version.unwrap_or(DEFAULT_STANDARD),
-            _config_frame: config_frame,
+            ieee_version: version.unwrap_or(DEFAULT_STANDARD),
+            config_frame: config_frame,
             _batch_size: 120,
             _channels: vec![],
             _pmus: vec![],
@@ -164,7 +168,7 @@ impl PDCBuffer {
 
         let consumer_manager = self._accumulator_manager.duplicate();
         let start_stream_cmd =
-            serialize_command(Command::StartStream, self._ieee_version, self.id_code);
+            serialize_command(Command::StartStream, self.ieee_version, self.id_code);
         let producer = {
             let mut stream = stream.try_clone().unwrap();
             thread::spawn(move || {
@@ -206,6 +210,7 @@ impl PDCBuffer {
                         println!("Invalid frame size: {}", frame.len());
                         continue;
                     }
+                    // TODO add logic to validate CRC value before processing.
 
                     if let Err(e) = consumer_manager.process_buffer(|buf| {
                         buf[..frame.len()].copy_from_slice(&frame);
@@ -226,7 +231,7 @@ impl PDCBuffer {
         println!("Stopping PDC stream");
         if let Ok(mut stream) = TcpStream::connect(format!("{}:{}", self.ip_addr, self.port)) {
             let stop_stream_cmd =
-                serialize_command(Command::StopStream, self._ieee_version, self.id_code);
+                serialize_command(Command::StopStream, self.ieee_version, self.id_code);
             let _ = stream.write_all(&stop_stream_cmd);
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
@@ -253,12 +258,13 @@ impl PDCBuffer {
         // TODO: implement the header frame.
         todo!()
     }
-    pub fn set_stream_channels(&mut self, channels: Vec<String>, channel_type: String) {
+    pub fn set_stream_channels(&mut self, _channels: Vec<String>, _channel_type: String) {
         // Set the stream channels
         // Set the accumulators by picking specific channels, or PMUs or stations.
         // Must be in the lists of channels, PMUs, or stations.
         // Channel type can be "channel", "pmu", or "station".
         // TODO: implement the channel type.
+        todo!()
     }
     pub fn list_channels(&self) -> Vec<String> {
         self._channels.clone()
@@ -270,16 +276,19 @@ impl PDCBuffer {
         self._stations.clone()
     }
 
-    fn _set_accumulators(&mut self, accumulators: Vec<f64>) {
+    fn _set_accumulators(&mut self, _accumulators: Vec<f64>) {
         todo!()
         // Set the accumulators
     }
-    pub fn get_pdc_dataframes(&self) -> Result<RecordBatch, String> {
+    pub fn get_data(
+        &self,
+        columns: Option<Vec<&str>>, // Optional list of column names
+        window_secs: Option<u64>,
+    ) -> Result<RecordBatch, String> {
         // This is a placeholder - implement the actual logic to get data from accumulator_manager
-        //self._accumulator_manager
-        todo!()
-        //    .get_dataframe()
-        //    .map_err(|e| format!("Failed to get dataframes: {:?}", e))
+        self._accumulator_manager
+            .get_dataframe(columns, window_secs)
+            .map_err(|e| format!("Failed to get dataframes: {:?}", e))
     }
     pub fn get_latest_buffer(&self) -> Vec<String> {
         todo!()

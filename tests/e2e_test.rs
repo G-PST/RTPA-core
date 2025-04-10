@@ -110,7 +110,7 @@ fn test_ieee_c37_118_e2e() {
     // Step 5: Query the dataframe
     let all_columns: Vec<usize> = (0..accumulator_manager.schema().fields().len()).collect();
     let dataframe = accumulator_manager
-        .get_dataframe(&all_columns, 10) // Get last 10 seconds of data
+        ._get_dataframe(&all_columns, 10) // Get last 10 seconds of data
         .expect("Failed to get dataframe");
 
     // Step 6: Verify the data

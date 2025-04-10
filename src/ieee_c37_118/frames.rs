@@ -52,7 +52,7 @@ impl fmt::Display for FrameType {
 }
 
 /// Common trait for all frame types
-pub trait Frame {
+pub trait Frame: Send + Sync {
     /// Get the frame type
     fn frame_type(&self) -> FrameType;
 
@@ -70,7 +70,7 @@ pub trait Frame {
 }
 
 /// Trait for all prefix frames
-pub trait PrefixFrame {
+pub trait PrefixFrame: Send + Sync {
     /// Get the sync value
     fn sync(&self) -> u16;
 
@@ -103,7 +103,7 @@ pub trait PrefixFrame {
 }
 
 /// Trait for configuration frames
-pub trait ConfigurationFrame: Frame {
+pub trait ConfigurationFrame: Frame + Send + Sync {
     /// Get the time base value
     fn time_base(&self) -> u32;
 
@@ -129,7 +129,7 @@ pub trait ConfigurationFrame: Frame {
 }
 
 /// Trait for command frames
-pub trait CommandFrame: Frame {
+pub trait CommandFrame: Frame + Send + Sync {
     /// Create a new command to turn off transmission
     fn new_turn_off_transmission(id_code: u16) -> Self
     where
@@ -181,7 +181,7 @@ pub trait CommandFrame: Frame {
 }
 
 /// Trait for data frames
-pub trait DataFrame: Frame {
+pub trait DataFrame: Frame + Send + Sync {
     /// Get the prefix frame
     fn prefix(&self) -> &dyn PrefixFrame;
 
