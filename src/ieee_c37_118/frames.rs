@@ -103,6 +103,7 @@ pub trait PrefixFrame: Send + Sync {
 }
 
 /// Trait for configuration frames
+
 pub trait ConfigurationFrame: Frame + Send + Sync {
     /// Get the time base value
     fn time_base(&self) -> u32;
@@ -121,6 +122,8 @@ pub trait ConfigurationFrame: Frame + Send + Sync {
 
     /// Get the prefix frame as trait object
     fn prefix(&self) -> &dyn PrefixFrame;
+
+    fn to_json(&self) -> Result<String, serde_json::Error>;
 
     /// Create a new configuration frame from bytes
     fn from_bytes(bytes: &[u8]) -> Result<Self, ParseError>

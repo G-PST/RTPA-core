@@ -1,5 +1,3 @@
-//use super::manager_trait::DataManager;
-
 use super::sparse::{
     Accumulate, Accumulator, C37118TimestampAccumulator, F32Accumulator, I16Accumulator,
     I32Accumulator, U16Accumulator,
@@ -8,18 +6,14 @@ use arrow::array::{ArrayRef, Float32Array, Int16Array, Int32Array, Int64Array, U
 use arrow::buffer::{Buffer, MutableBuffer};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use core_affinity;
 use rayon::prelude::*;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Condvar, Mutex, RwLock};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_BUFFER_SIZE: usize = 55 * 1024;
-const BATCH_SIZE: usize = 120; // Rows per batch (e.g., 1s at 60 Hz)
-                               // Should we do 128 for alignment?
+const BATCH_SIZE: usize = 120;
 
 #[derive(Debug, Clone)]
 pub struct AccumulatorConfig {
@@ -35,64 +29,49 @@ pub struct AccumulatorManager {
     configs: Vec<AccumulatorConfig>,
     schema: Arc<Schema>,
     records: Arc<Mutex<VecDeque<(u64, RecordBatch)>>>,
-    input_buffer: Arc<RwLock<Vec<u8>>>,
-    written_bytes: Arc<RwLock<usize>>,
-    shutdown: Arc<AtomicBool>,
-    work_senders: Vec<Sender<()>>, // Signal work to threads
-    completion_count: Arc<(Mutex<usize>, Condvar)>, // Count completed threads
-    threads: Vec<JoinHandle<()>>,
-    batch_index: Arc<RwLock<usize>>,
+    batch_index: usize,
     max_batches: usize,
-    num_threads: usize, // Added to track expected thread count
     buffer_size: usize,
     batch_size: usize,
 }
 
 impl AccumulatorManager {
-    pub fn new(configs: Vec<AccumulatorConfig>, num_threads: usize, max_batches: usize) -> Self {
-        Self::new_with_params(
-            configs,
-            num_threads,
-            max_batches,
-            MAX_BUFFER_SIZE,
-            BATCH_SIZE,
-        )
+    pub fn new(configs: Vec<AccumulatorConfig>, max_batches: usize) -> Self {
+        Self::new_with_params(configs, max_batches, MAX_BUFFER_SIZE, BATCH_SIZE)
     }
 
     pub fn new_with_params(
         configs: Vec<AccumulatorConfig>,
-        num_threads: usize,
         max_batches: usize,
         buffer_size: usize,
         batch_size: usize,
     ) -> Self {
-        // First, check that all accumulators have valid location and length
-        let mut valid_configs = Vec::new();
-
-        for config in configs {
-            if (config.var_loc as usize) + (config.var_len as usize) <= buffer_size {
-                valid_configs.push(config);
-            } else {
-                println!(
-                    "WARNING: Ignoring invalid accumulator at var_loc={} with var_len={} because it exceeds buffer_size={}",
-                    config.var_loc, config.var_len, buffer_size
-                );
-            }
-        }
+        let valid_configs: Vec<_> = configs
+            .into_iter()
+            .filter(|config| {
+                if (config.var_loc as usize) + (config.var_len as usize) <= buffer_size {
+                    true
+                } else {
+                    println!(
+                        "WARNING: Ignoring invalid accumulator at var_loc={} with var_len={}",
+                        config.var_loc, config.var_len
+                    );
+                    false
+                }
+            })
+            .collect();
 
         if valid_configs.is_empty() {
             panic!("No valid accumulators provided!");
         }
 
-        // Initialize schema
         let fields: Vec<Field> = valid_configs
             .iter()
             .map(|config| Field::new(&config.name, config.var_type.clone(), false))
             .collect();
         let schema = Arc::new(Schema::new(fields));
 
-        // Initialize output_buffers
-        let output_buffers: Vec<Arc<Mutex<MutableBuffer>>> = valid_configs
+        let output_buffers: Vec<_> = valid_configs
             .iter()
             .map(|config| {
                 let capacity = match config.var_type {
@@ -101,308 +80,126 @@ impl AccumulatorManager {
                     DataType::Int16 => batch_size * std::mem::size_of::<i16>(),
                     DataType::UInt16 => batch_size * std::mem::size_of::<u16>(),
                     DataType::Int64 => batch_size * std::mem::size_of::<i64>(),
-                    //DataType::Timestamp(_, _) => batch_size * std::mem::size_of::<i64>(),
                     _ => panic!("Unsupported data type: {:?}", config.var_type),
                 };
                 Arc::new(Mutex::new(MutableBuffer::new(capacity)))
             })
-            .collect();
+            .collect::<Vec<_>>();
 
-        // Create the shared resources
-        let input_buffer: Arc<RwLock<Vec<u8>>> =
-            Arc::new(RwLock::new(Vec::with_capacity(buffer_size)));
-        let written_bytes = Arc::new(RwLock::new(0));
-        let batch_index = Arc::new(RwLock::new(0));
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let records: Arc<Mutex<VecDeque<(u64, RecordBatch)>>> =
-            Arc::new(Mutex::new(VecDeque::with_capacity(max_batches)));
-
-        // Create thread synchronization mechanisms
-        let completion_count = Arc::new((Mutex::new(0), Condvar::new()));
-        let mut work_senders = Vec::new();
-        let mut threads = Vec::new();
-
-        let core_ids = core_affinity::get_core_ids().unwrap_or_else(|| {
-            (0..num_threads)
-                .map(|_| core_affinity::CoreId { id: 0 })
-                .collect()
-        });
-
-        let num_cores = core_ids.len();
-        let actual_threads = std::cmp::min(num_threads, num_cores);
-
-        if actual_threads < num_threads {
-            println!(
-                "WARNING: Requested {} threads but only {} cores available",
-                num_threads, num_cores
-            );
-        }
-
-        let accumulators_per_thread = (valid_configs.len() + actual_threads - 1) / actual_threads;
-
-        for i in 0..actual_threads {
-            let core_id = core_ids[i];
-            let start_idx = i * accumulators_per_thread;
-            let end_idx = std::cmp::min(start_idx + accumulators_per_thread, valid_configs.len());
-            if start_idx >= valid_configs.len() {
-                break;
-            }
-
-            let thread_configs = valid_configs[start_idx..end_idx].to_vec();
-            let thread_buffers = output_buffers[start_idx..end_idx].to_vec();
-
-            // Clone the shared resources for this thread
-            let input_buffer_clone = input_buffer.clone();
-            let written_bytes_clone = written_bytes.clone();
-            let shutdown_clone = shutdown.clone();
-            let completion_count_clone = completion_count.clone();
-            let (work_sender, work_receiver) = channel();
-
-            let handle = thread::spawn(move || {
-                let _ = core_affinity::set_for_current(core_id);
-                let accumulators: Vec<Accumulator> = thread_configs
-                    .iter()
-                    .map(|config| match (config.var_type.clone(), config.var_len) {
-                        (DataType::UInt16, 2) => Accumulator::U16(U16Accumulator {
-                            var_loc: config.var_loc,
-                        }),
-                        (DataType::Int16, 2) => Accumulator::I16(I16Accumulator {
-                            var_loc: config.var_loc,
-                        }),
-                        (DataType::Int32, 4) => Accumulator::I32(I32Accumulator {
-                            var_loc: config.var_loc,
-                        }),
-                        (DataType::Float32, 4) => Accumulator::F32(F32Accumulator {
-                            var_loc: config.var_loc,
-                        }),
-                        (DataType::Int64, 8) => {
-                            Accumulator::Timestamp(C37118TimestampAccumulator {
-                                var_loc: config.var_loc,
-                            })
-                        }
-                        (var_type, var_len) => panic!(
-                            "Unsupported (type, len) combination: {:?}, {}",
-                            var_type, var_len
-                        ),
-                    })
-                    .collect();
-
-                while !shutdown_clone.load(Ordering::SeqCst) {
-                    match work_receiver.recv() {
-                        Ok(()) => {
-                            let bytes = *written_bytes_clone.read().unwrap();
-                            if bytes > 0 {
-                                let input_data =
-                                    input_buffer_clone.read().unwrap()[..bytes].to_vec();
-                                for (acc, buffer) in accumulators.iter().zip(thread_buffers.iter())
-                                {
-                                    let mut buffer_guard = buffer.lock().unwrap();
-                                    acc.accumulate(&input_data, &mut buffer_guard);
-                                }
-                            }
-
-                            // Signal completion by incrementing the counter
-                            let (count_mutex, cvar) = &*completion_count_clone;
-                            let mut count = count_mutex.lock().unwrap();
-                            *count += 1;
-                            cvar.notify_all();
-                        }
-                        Err(_) => break, // Channel closed, shutdown
-                    }
-                }
-            });
-
-            work_senders.push(work_sender);
-            threads.push(handle);
-        }
+        let records = Arc::new(Mutex::new(VecDeque::with_capacity(max_batches)));
 
         AccumulatorManager {
             output_buffers,
             configs: valid_configs,
             schema,
             records,
-            input_buffer,
-            written_bytes,
-            shutdown,
-            work_senders,
-            completion_count,
-            threads,
-            batch_index,
+            batch_index: 0,
             max_batches,
-            num_threads: actual_threads,
             buffer_size,
             batch_size,
         }
-    }
-
-    // Convenience constructor with simple tuple inputs
-    pub fn from_simple_configs(
-        configs: Vec<(u16, u8, DataType, String)>,
-        num_threads: usize,
-        max_batches: usize,
-    ) -> Self {
-        let acc_configs = configs
-            .into_iter()
-            .map(|(var_loc, var_len, var_type, name)| AccumulatorConfig {
-                var_loc,
-                var_len,
-                var_type,
-                name,
-            })
-            .collect();
-
-        Self::new(acc_configs, num_threads, max_batches)
-    }
-
-    pub fn from_simple_configs_with_params(
-        configs: Vec<(u16, u8, DataType, String)>,
-        num_threads: usize,
-        max_batches: usize,
-        buffer_size: usize,
-        batch_size: usize,
-    ) -> Self {
-        let acc_configs = configs
-            .into_iter()
-            .map(|(var_loc, var_len, var_type, name)| AccumulatorConfig {
-                var_loc,
-                var_len,
-                var_type,
-                name,
-            })
-            .collect();
-
-        Self::new_with_params(
-            acc_configs,
-            num_threads,
-            max_batches,
-            buffer_size,
-            batch_size,
-        )
     }
 
     pub fn duplicate(&self) -> Self {
-        // Create a new instance with the same configuration
-        let new_manager = AccumulatorManager::new_with_params(
+        Self::new_with_params(
             self.configs.clone(),
-            self.num_threads,
             self.max_batches,
             self.buffer_size,
             self.batch_size,
-        );
-        new_manager
+        )
     }
 
-    pub fn process_buffer<F>(&self, writer: F) -> Result<(), String>
+    pub fn process_buffer<F>(&mut self, writer: F) -> Result<(), String>
     where
         F: FnOnce(&mut Vec<u8>) -> usize,
     {
-        if self.shutdown.load(Ordering::SeqCst) {
-            return Err("Manager is shutting down".to_string());
-        }
+        let mut input_buffer = vec![0u8; self.buffer_size];
+        let written = writer(&mut input_buffer);
 
-        let written = {
-            let mut input_guard = self.input_buffer.write().unwrap();
-            input_guard.clear();
-            input_guard.resize(self.buffer_size, 0);
-            let bytes = writer(&mut input_guard);
-            if bytes > self.buffer_size {
-                return Err("Written data exceeds max buffer size".to_string());
-            }
-            bytes
-        };
+        if written > self.buffer_size {
+            return Err("Written data exceeds max buffer size".to_string());
+        }
 
         if written == 0 {
             return Err("No data written to buffer".to_string());
         }
 
-        // Update written bytes atomically
-        *self.written_bytes.write().unwrap() = written;
-
-        // Reset completion counter
-        {
-            let (count_mutex, _) = &*self.completion_count;
-            let mut count = count_mutex.lock().unwrap();
-            *count = 0;
-        }
-
-        // Signal all worker threads
-        for sender in &self.work_senders {
-            match sender.send(()) {
-                Ok(_) => {}
-                Err(e) => return Err(format!("Failed to signal thread: {}", e)),
-            }
-        }
-
-        // Wait for all threads to complete using condition variable
-        let timeout = Duration::from_secs(1); // 1 second timeout per thread
-        {
-            let (count_mutex, cvar) = &*self.completion_count;
-            let mut count = count_mutex.lock().unwrap();
-
-            while *count < self.work_senders.len() {
-                let result = cvar.wait_timeout(count, timeout).unwrap();
-                count = result.0;
-
-                if result.1.timed_out() {
-                    println!(
-                        "WARNING: Timeout waiting for thread completions, got {}/{}",
-                        *count,
-                        self.work_senders.len()
-                    );
-                    // Continue anyway - this prevents permanent deadlock
-                    break;
+        let accumulators: Vec<Accumulator> = self
+            .configs
+            .iter()
+            .map(|config| match (config.var_type.clone(), config.var_len) {
+                (DataType::UInt16, 2) => Accumulator::U16(U16Accumulator {
+                    var_loc: config.var_loc,
+                }),
+                (DataType::Int16, 2) => Accumulator::I16(I16Accumulator {
+                    var_loc: config.var_loc,
+                }),
+                (DataType::Int32, 4) => Accumulator::I32(I32Accumulator {
+                    var_loc: config.var_loc,
+                }),
+                (DataType::Float32, 4) => Accumulator::F32(F32Accumulator {
+                    var_loc: config.var_loc,
+                }),
+                (DataType::Int64, 8) => Accumulator::Timestamp(C37118TimestampAccumulator {
+                    var_loc: config.var_loc,
+                }),
+                (var_type, var_len) => {
+                    panic!(
+                        "Unsupported (type, len) combination: {:?}, {}",
+                        var_type, var_len
+                    )
                 }
-            }
-        }
+            })
+            .collect();
 
-        // Update batch index and check if we need to save
-        let mut idx = self.batch_index.write().unwrap();
-        *idx += 1;
+        // Process buffer in parallel
+        self.output_buffers
+            .par_iter()
+            .zip(accumulators.par_iter())
+            .for_each(|(buffer, acc)| {
+                let mut buffer_guard = buffer.lock().unwrap();
+                acc.accumulate(&input_buffer[..written], &mut buffer_guard);
+            });
 
-        if *idx >= self.batch_size {
+        self.batch_index += 1;
+
+        // If we've reached batch size, save the batch
+        if self.batch_index >= self.batch_size {
             self.save_batch();
-            *idx = 0;
+            self.batch_index = 0;
         }
 
-        *self.written_bytes.write().unwrap() = 0;
         Ok(())
     }
 
-    pub fn flush_pending_batch(&self) {
-        let idx = *self.batch_index.read().unwrap();
-        if idx > 0 {
+    pub fn flush_pending_batch(&mut self) {
+        if self.batch_index > 0 {
             self.save_batch();
-            *self.batch_index.write().unwrap() = 0;
+            self.batch_index = 0;
         }
     }
 
     fn save_batch(&self) {
-        let mut has_data = false;
-        for buffer in self.output_buffers.iter() {
-            let len = buffer.lock().unwrap().len();
-            if len > 0 {
-                has_data = true;
-                break;
-            }
-        }
+        let has_data = self.output_buffers.iter().any(|buffer| {
+            let buffer = buffer.lock().unwrap();
+            !buffer.is_empty()
+        });
 
         if !has_data {
-            println!("No data to save in any column");
             return;
         }
 
-        // Copy MutableBuffers to immutable Buffers in parallel
+        // Create arrays from buffers in parallel
         let arrays: Vec<ArrayRef> = self
             .output_buffers
             .par_iter()
             .zip(self.configs.par_iter())
-            .map(|(buffer, config)| {
-                let buffer_guard = buffer.lock().unwrap();
-                let data_buffer = Buffer::from(&buffer_guard.as_slice()[..buffer_guard.len()]);
+            .map(|(buffer_arc, config)| {
+                let buffer = buffer_arc.lock().unwrap();
+                let data_buffer = Buffer::from(buffer.as_slice());
 
                 match config.var_type {
                     DataType::Float32 => {
-                        // Calculate how many complete f32 values we have
                         let num_values = data_buffer.len() / std::mem::size_of::<f32>();
                         let values = unsafe {
                             std::slice::from_raw_parts(
@@ -457,66 +254,57 @@ impl AccumulatorManager {
             })
             .collect();
 
-        // Create RecordBatch
+        // Create record batch
         let batch = RecordBatch::try_new(self.schema.clone(), arrays).unwrap();
+
+        // Get timestamp
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
 
-        // Store in records, evict oldest if necessary
+        // Store in records
         let mut records = self.records.lock().unwrap();
         records.push_back((timestamp, batch));
         if records.len() > self.max_batches {
             records.pop_front();
         }
 
-        // Reset MutableBuffers
-        self.output_buffers.par_iter().for_each(|buffer| {
-            let mut buffer_guard = buffer.lock().unwrap();
-            buffer_guard.clear();
-        });
+        // Clear all buffers
+        self.output_buffers
+            .par_iter()
+            .for_each(|buffer| buffer.lock().unwrap().clear());
     }
 
-    pub fn shutdown(self) {
-        self.shutdown.store(true, Ordering::SeqCst);
-        // Dropping senders will close channels, causing threads to exit
-        drop(self.work_senders);
-        for handle in self.threads {
-            if let Err(e) = handle.join() {
-                eprintln!("Error joining thread: {:?}", e);
-            }
-        }
+    pub fn shutdown(mut self) {
+        // Flush any pending batch before shutdown
+        self.flush_pending_batch();
     }
 
-    // Add accessor for the schema
     pub fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
     }
 
     pub fn get_dataframe(
-        &self,
-        columns: Option<Vec<&str>>, // Optional list of column names
-        window_secs: Option<u64>,   // Optional time window in seconds
+        &mut self,
+        columns: Option<Vec<&str>>,
+        window_secs: Option<u64>,
     ) -> Result<RecordBatch, String> {
-        // Resolve column names to indices
+        // Flush any pending data to make sure we have the latest data
+        self.flush_pending_batch();
+
         let column_indices = match columns {
-            Some(col_names) => {
-                let schema = self.schema.as_ref();
-                col_names
-                    .into_iter()
-                    .map(|name| {
-                        schema
-                            .index_of(name)
-                            .map_err(|e| format!("Column '{}' not found in schema: {}", name, e))
-                    })
-                    .collect::<Result<Vec<usize>, String>>()?
-            }
-            None => (0..self.schema.fields().len()).collect(), // Default to all columns
+            Some(col_names) => col_names
+                .into_iter()
+                .map(|name| {
+                    self.schema
+                        .index_of(name)
+                        .map_err(|e| format!("Column '{}' not found in schema: {}", name, e))
+                })
+                .collect::<Result<Vec<usize>, String>>()?,
+            None => (0..self.schema.fields().len()).collect(),
         };
 
-        // Use the original get_dataframe method with the resolved indices
-        // Pass window_secs as-is (None will be handled by the original method if needed)
         self._get_dataframe(&column_indices, window_secs.unwrap_or(u64::MAX))
     }
 
@@ -525,68 +313,14 @@ impl AccumulatorManager {
         columns: &[usize],
         window_secs: u64,
     ) -> Result<RecordBatch, String> {
-        if self.shutdown.load(Ordering::SeqCst) {
-            return Err("Manager is shutting down".to_string());
-        }
-
-        self.flush_pending_batch();
-        // Force flush of current buffer, even if not full
-        {
-            let idx = *self.batch_index.read().unwrap();
-            if idx > 0 {
-                let bytes = *self.written_bytes.read().unwrap();
-                if bytes > 0 {
-                    // Reset completion counter
-                    {
-                        let (count_mutex, _) = &*self.completion_count;
-                        let mut count = count_mutex.lock().unwrap();
-                        *count = 0;
-                    }
-
-                    // Signal all threads to process the current buffer
-                    for sender in &self.work_senders {
-                        sender
-                            .send(())
-                            .map_err(|e| format!("Failed to signal thread for flush: {}", e))?;
-                    }
-
-                    // Wait for all threads to complete using condition variable
-                    {
-                        let (count_mutex, cvar) = &*self.completion_count;
-                        let mut count = count_mutex.lock().unwrap();
-
-                        while *count < self.num_threads {
-                            let result = cvar.wait_timeout(count, Duration::from_secs(5)).unwrap();
-                            count = result.0;
-
-                            if result.1.timed_out() {
-                                return Err(format!(
-                                    "Deadlock detected in get_dataframe flush: only {}/{} threads completed",
-                                    *count, self.num_threads
-                                ));
-                            }
-                        }
-                    }
-
-                    // Save the partial batch and reset state
-                    self.save_batch();
-                    *self.batch_index.write().unwrap() = 0;
-                    *self.written_bytes.write().unwrap() = 0;
-                }
-            }
-        }
-
-        // Calculate time window
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-        let start_time = now.saturating_sub(window_secs * 1000);
+        let start_time = now.saturating_sub(window_secs.saturating_mul(1000));
 
-        // Access stored records
         let records = self.records.lock().unwrap();
         if records.is_empty() {
-            // If no records, create an empty batch with the correct schema
             let sub_schema = Arc::new(Schema::new(
                 columns
                     .iter()
@@ -612,13 +346,11 @@ impl AccumulatorManager {
                 .map_err(|e| format!("Failed to create empty record batch: {}", e));
         }
 
-        // Find the start index for the time window using binary search
         let start_idx = match records.binary_search_by(|(ts, _)| ts.cmp(&start_time)) {
             Ok(idx) => idx,
             Err(idx) => idx.saturating_sub(1).max(0),
         };
 
-        // Collect batches within the window
         let batches: Vec<&RecordBatch> = records
             .iter()
             .skip(start_idx)
@@ -629,7 +361,6 @@ impl AccumulatorManager {
             return Err("No data available for the requested window".to_string());
         }
 
-        // Create a subset schema for the requested columns
         let sub_schema = Arc::new(Schema::new(
             columns
                 .iter()
@@ -637,15 +368,14 @@ impl AccumulatorManager {
                 .collect::<Vec<Field>>(),
         ));
 
-        // First collect all column indices and schema data types
         let column_data: Vec<(usize, &DataType)> = columns
             .iter()
             .map(|&col_idx| (col_idx, self.schema.field(col_idx).data_type()))
             .collect();
 
-        // Collect all the arrays sequentially first
+        // Process columns in parallel
         let arrays_by_column: Vec<Vec<&dyn arrow::array::Array>> = column_data
-            .iter()
+            .par_iter()
             .map(|&(col_idx, _)| {
                 batches
                     .iter()
@@ -654,7 +384,6 @@ impl AccumulatorManager {
             })
             .collect();
 
-        // Now we can safely use Rayon without sharing the AccumulatorManager
         let concatenated_arrays: Vec<ArrayRef> = arrays_by_column
             .into_par_iter()
             .zip(column_data.par_iter())
@@ -684,8 +413,193 @@ impl AccumulatorManager {
             })
             .collect();
 
-        // Create and return the final RecordBatch
         RecordBatch::try_new(sub_schema, concatenated_arrays)
             .map_err(|e| format!("Failed to create record batch: {}", e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::Array;
+
+    #[test]
+    fn test_process_buffer_multiple_times() {
+        let configs = vec![
+            AccumulatorConfig {
+                var_loc: 0,
+                var_len: 4,
+                var_type: DataType::Float32,
+                name: "float_col".to_string(),
+            },
+            AccumulatorConfig {
+                var_loc: 4,
+                var_len: 2,
+                var_type: DataType::UInt16,
+                name: "uint16_col".to_string(),
+            },
+        ];
+
+        let mut manager = AccumulatorManager::new_with_params(configs, 10, 16, 5);
+
+        let input_buffer = vec![
+            0x41, 0x20, 0x00, 0x00, // f32: 10.0 in big-endian
+            0x00, 0x14, // u16: 20 in big-endian
+        ];
+
+        let n = 5;
+        for _ in 0..n {
+            manager
+                .process_buffer(|buf| {
+                    buf[..input_buffer.len()].copy_from_slice(&input_buffer);
+                    input_buffer.len()
+                })
+                .unwrap();
+        }
+
+        // Get data frame will flush the pending batch
+        let result = manager
+            .get_dataframe(Some(vec!["float_col", "uint16_col"]), None)
+            .unwrap();
+
+        assert_eq!(result.num_rows(), n, "Should have {} rows", n);
+
+        let float_col = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+        for i in 0..n {
+            assert_eq!(
+                float_col.value(i),
+                10.0,
+                "Float column should have value 10.0 at index {}",
+                i
+            );
+        }
+
+        let uint16_col = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<UInt16Array>()
+            .unwrap();
+        for i in 0..n {
+            assert_eq!(
+                uint16_col.value(i),
+                20,
+                "UInt16 column should have value 20 at index {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_empty_buffer() {
+        let configs = vec![AccumulatorConfig {
+            var_loc: 0,
+            var_len: 4,
+            var_type: DataType::Float32,
+            name: "float_col".to_string(),
+        }];
+
+        let mut manager = AccumulatorManager::new_with_params(configs, 10, 16, 5);
+
+        let result = manager.process_buffer(|_| 0);
+        assert!(result.is_err(), "Empty buffer should return error");
+        assert_eq!(
+            result.unwrap_err(),
+            "No data written to buffer",
+            "Correct error message for empty buffer"
+        );
+
+        let dataframe = manager.get_dataframe(None, None).unwrap();
+        assert_eq!(dataframe.num_rows(), 0, "Dataframe should be empty");
+    }
+
+    #[test]
+    fn test_shutdown() {
+        let configs = vec![AccumulatorConfig {
+            var_loc: 0,
+            var_len: 4,
+            var_type: DataType::Float32,
+            name: "float_col".to_string(),
+        }];
+
+        let mut manager = AccumulatorManager::new_with_params(configs.clone(), 10, 16, 5);
+
+        // Process some data
+        manager
+            .process_buffer(|buf| {
+                buf[..4].copy_from_slice(&[0x41, 0x20, 0x00, 0x00]);
+                4
+            })
+            .unwrap();
+
+        // Shutdown should flush any pending batches
+        manager.shutdown();
+
+        // Create a new manager
+        let mut new_manager = AccumulatorManager::new_with_params(configs, 10, 16, 5);
+        let result = new_manager.process_buffer(|buf| {
+            buf[..4].copy_from_slice(&[0x41, 0x20, 0x00, 0x00]);
+            4
+        });
+
+        assert!(
+            result.is_ok(),
+            "Process buffer should succeed on a new manager"
+        );
+    }
+
+    #[test]
+    fn test_buffer_pool_recycling() {
+        let configs = vec![AccumulatorConfig {
+            var_loc: 0,
+            var_len: 4,
+            var_type: DataType::Float32,
+            name: "float_col".to_string(),
+        }];
+
+        let mut manager = AccumulatorManager::new_with_params(configs, 10, 16, 3);
+
+        // Process enough data to fill a batch
+        let input_buffer = vec![0x41, 0x20, 0x00, 0x00]; // Float32 value
+
+        // Process exactly batch_size items to trigger a full batch
+        for _ in 0..3 {
+            manager
+                .process_buffer(|buf| {
+                    buf[..input_buffer.len()].copy_from_slice(&input_buffer);
+                    input_buffer.len()
+                })
+                .unwrap();
+        }
+
+        // This should have created a batch
+        {
+            let records = manager.records.lock().unwrap();
+            assert_eq!(records.len(), 1, "Should have created one batch");
+        }
+
+        // Process one more to start a new batch
+        manager
+            .process_buffer(|buf| {
+                buf[..input_buffer.len()].copy_from_slice(&input_buffer);
+                input_buffer.len()
+            })
+            .unwrap();
+
+        // Flush the pending batch
+        manager.flush_pending_batch();
+
+        // Now we should have two batches
+        {
+            let records = manager.records.lock().unwrap();
+            assert_eq!(records.len(), 2, "Should have two batches after flush");
+        }
+
+        // Get a dataframe to make sure we can access the data
+        let result = manager.get_dataframe(None, None).unwrap();
+        assert_eq!(result.num_rows(), 4, "Should have 4 rows in total");
     }
 }

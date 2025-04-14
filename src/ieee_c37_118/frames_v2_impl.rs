@@ -108,6 +108,9 @@ impl Frame for ConfigurationFrame1and2_2011 {
 
 // Implement ConfigurationFrame for ConfigurationFrame1and2_2011
 impl ConfigurationFrame for ConfigurationFrame1and2_2011 {
+    fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
     fn from_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
         const PREFIX_SIZE: usize = 14;
 

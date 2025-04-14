@@ -68,7 +68,6 @@ fn test_ieee_c37_118_e2e() {
     let accumulator_configs = config_to_accumulators(&*config_frame);
 
     // Step 3: Create the accumulator manager
-    let num_threads = 2; // Use 2 threads for the test
     let max_batches = 5; // Keep up to 5 batches in memory
     let data_frame_size = config_frame.calc_data_frame_size();
     let batch_size = 10; // Process 10 frames in a batch for testing
@@ -78,9 +77,8 @@ fn test_ieee_c37_118_e2e() {
         data_frame_size
     );
 
-    let accumulator_manager = AccumulatorManager::new_with_params(
+    let mut accumulator_manager = AccumulatorManager::new_with_params(
         accumulator_configs,
-        num_threads,
         max_batches,
         data_frame_size,
         batch_size,

@@ -11,6 +11,7 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+use std::sync::{Arc, Mutex};
 
 use std::thread::{self, JoinHandle};
 
@@ -21,6 +22,7 @@ use super::ieee_c37_118::frames::ConfigurationFrame;
 use super::ieee_c37_118::utils::{parse_frame_type, parse_protocol_version};
 use super::ieee_c37_118::{serialize_command, Command, VersionStandard};
 
+use crate::ieee_c37_118::utils::validate_checksum;
 use crate::ieee_c37_118::{parse_configuration_frame, FrameType};
 use crate::utils::config_to_accumulators;
 
@@ -31,9 +33,9 @@ pub struct PDCBuffer {
     pub port: u16,
     pub id_code: u16,
     _accumulators: Vec<AccumulatorConfig>,
-    _accumulator_manager: AccumulatorManager, // Thread safe manager.
-    pub ieee_version: VersionStandard,        // The ieee standard version 1&2 or 3
-    pub config_frame: Box<dyn ConfigurationFrame>, // The configuration frame of the PDC
+    _accumulator_manager: Arc<Mutex<AccumulatorManager>>, // Thread safe manager.
+    pub ieee_version: VersionStandard,                    // The ieee standard version 1&2 or 3
+    pub config_frame: Box<dyn ConfigurationFrame>,        // The configuration frame of the PDC
     _batch_size: usize,
     _channels: Vec<String>,
     _pmus: Vec<String>,
@@ -41,6 +43,7 @@ pub struct PDCBuffer {
     producer_handle: Option<JoinHandle<()>>,
     consumer_handle: Option<JoinHandle<()>>,
     shutdown_tx: Option<Sender<()>>,
+    latest_buffer_request_tx: Arc<Mutex<Option<mpsc::Sender<mpsc::Sender<Vec<u8>>>>>>,
 }
 
 impl PDCBuffer {
@@ -119,7 +122,6 @@ impl PDCBuffer {
 
         let accumulator_manager = AccumulatorManager::new_with_params(
             accumulators.clone(),
-            2,
             60 * 2, // TODO add parameter to adjust the window
             // Should look at config frequency and input parameter to initialize window.
             // Would be nice to have an option to extend the window while it is still running.
@@ -127,15 +129,16 @@ impl PDCBuffer {
             // Alternatively, could look at largest AccumulatorConfig var_loc + size to determine endpoint.
             128,
         );
+
         println!("RTPA Buffer Initialization Successful");
         PDCBuffer {
             ip_addr,
             port,
             id_code,
             _accumulators: accumulators,
-            _accumulator_manager: accumulator_manager,
+            _accumulator_manager: Arc::new(Mutex::new(accumulator_manager)),
             ieee_version: version.unwrap_or(DEFAULT_STANDARD),
-            config_frame: config_frame,
+            config_frame,
             _batch_size: 120,
             _channels: vec![],
             _pmus: vec![],
@@ -143,8 +146,10 @@ impl PDCBuffer {
             producer_handle: None,
             consumer_handle: None,
             shutdown_tx: None,
+            latest_buffer_request_tx: Arc::new(Mutex::new(None)),
         }
     }
+
     pub fn start_stream(&mut self) {
         // Start the stream
         //
@@ -166,32 +171,75 @@ impl PDCBuffer {
         let (tx, rx): (SyncSender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::sync_channel(100);
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
-        let consumer_manager = self._accumulator_manager.duplicate();
+        let consumer_manager = self._accumulator_manager.clone();
         let start_stream_cmd =
             serialize_command(Command::StartStream, self.ieee_version, self.id_code);
+
+        let (buffer_request_tx, buffer_request_rx) = mpsc::channel();
+
+        // Store the sender in our struct
+        if let Ok(mut tx_guard) = self.latest_buffer_request_tx.lock() {
+            *tx_guard = Some(buffer_request_tx);
+        }
+
         let producer = {
             let mut stream = stream.try_clone().unwrap();
             thread::spawn(move || {
-                let mut buffer = vec![0; 55 * 1024];
-
-                // TODO we should have the version detected be updated in a field in the struct.
-
                 if stream.write_all(&start_stream_cmd).is_err() {
                     println!("Failed to send START_STREAM command");
                     return;
                 }
 
+                let mut peek_buffer = [0u8; 4];
+                // TODO we should know the size of this frame after reading the configuration.
+                let mut current_frame_buffer = Vec::new();
+
                 loop {
+                    if let Ok(response_tx) = buffer_request_rx.try_recv() {
+                        // Send the latest frame buffer through the one-shot channel
+                        let _ = response_tx.send(current_frame_buffer.clone());
+                    }
+
                     if shutdown_rx.try_recv().is_ok() {
                         println!("Producer shutting down");
                         break;
                     }
 
-                    match stream.read_exact(&mut buffer) {
+                    // Read SYNC and frame size (4 bytes)
+                    match stream.read_exact(&mut peek_buffer) {
                         Ok(()) => {
-                            if tx.send(buffer.clone()).is_err() {
-                                println!("Consumer disconnected");
-                                break;
+                            let frame_size =
+                                u16::from_be_bytes([peek_buffer[2], peek_buffer[3]]) as usize;
+                            if frame_size > 56 * 1024 {
+                                println!("Invalid frame size: {}", frame_size);
+                                continue;
+                            }
+
+                            // Read the rest of the frame
+                            current_frame_buffer = vec![0u8; frame_size];
+                            current_frame_buffer[..4].copy_from_slice(&peek_buffer); // Include SYNC and size
+
+                            if frame_size > 4 {
+                                match stream.read_exact(&mut current_frame_buffer[4..]) {
+                                    Ok(()) => {
+                                        // Save this as our latest frame
+                                        //
+
+                                        if tx.send(current_frame_buffer.clone()).is_err() {
+                                            println!("Consumer disconnected");
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        println!("Stream read error: {}", e);
+                                        break;
+                                    }
+                                }
+                            } else {
+                                if tx.send(current_frame_buffer.clone()).is_err() {
+                                    println!("Consumer disconnected");
+                                    break;
+                                }
                             }
                         }
                         Err(e) => {
@@ -211,8 +259,20 @@ impl PDCBuffer {
                         continue;
                     }
                     // TODO add logic to validate CRC value before processing.
+                    if validate_checksum(&frame) == false {
+                        println!("Invalid Checksum, Skipping buffer.")
+                    }
 
-                    if let Err(e) = consumer_manager.process_buffer(|buf| {
+                    // Lock the manager to process the buffer
+                    let mut manager = match consumer_manager.lock() {
+                        Ok(manager) => manager,
+                        Err(e) => {
+                            println!("Failed to lock accumulator manager: {:?}", e);
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = manager.process_buffer(|buf| {
                         buf[..frame.len()].copy_from_slice(&frame);
                         frame.len()
                     }) {
@@ -227,8 +287,15 @@ impl PDCBuffer {
         self.consumer_handle = Some(consumer);
         self.shutdown_tx = Some(shutdown_tx);
     }
+
     pub fn stop_stream(&mut self) {
         println!("Stopping PDC stream");
+
+        // Clear the buffer request channel
+        if let Ok(mut tx_guard) = self.latest_buffer_request_tx.lock() {
+            *tx_guard = None;
+        }
+
         if let Ok(mut stream) = TcpStream::connect(format!("{}:{}", self.ip_addr, self.port)) {
             let stop_stream_cmd =
                 serialize_command(Command::StopStream, self.ieee_version, self.id_code);
@@ -248,16 +315,22 @@ impl PDCBuffer {
         }
     }
 
+    pub fn config_to_json(&self) -> Result<String, serde_json::Error> {
+        self.config_frame.to_json()
+    }
+
     pub fn get_pdc_configuration(&self) {
         // Get the configuration
         // This should return the PDC Configuration frame Struct, which
         // has a method to convert to json.
     }
+
     pub fn get_pdc_header(&self) {
         // Get the header
         // TODO: implement the header frame.
         todo!()
     }
+
     pub fn set_stream_channels(&mut self, _channels: Vec<String>, _channel_type: String) {
         // Set the stream channels
         // Set the accumulators by picking specific channels, or PMUs or stations.
@@ -266,32 +339,77 @@ impl PDCBuffer {
         // TODO: implement the channel type.
         todo!()
     }
+
     pub fn list_channels(&self) -> Vec<String> {
+        // Lists the set of channels as strings based on the config.
         self._channels.clone()
     }
+
     pub fn list_pmus(&self) -> Vec<String> {
+        // Lists the names of PMUs as strings based on the config.
         self._pmus.clone()
     }
+
     pub fn list_stations(&self) -> Vec<String> {
+        // Lists the names of the stations as strings based on the config.
         self._stations.clone()
     }
 
-    fn _set_accumulators(&mut self, _accumulators: Vec<f64>) {
-        todo!()
-        // Set the accumulators
-    }
     pub fn get_data(
         &self,
         columns: Option<Vec<&str>>, // Optional list of column names
         window_secs: Option<u64>,
     ) -> Result<RecordBatch, String> {
-        // This is a placeholder - implement the actual logic to get data from accumulator_manager
-        self._accumulator_manager
+        // Get a mutable reference to the manager and get dataframe
+        let mut manager = match self._accumulator_manager.lock() {
+            Ok(manager) => manager,
+            Err(e) => return Err(format!("Failed to lock accumulator manager: {:?}", e)),
+        };
+
+        manager
             .get_dataframe(columns, window_secs)
             .map_err(|e| format!("Failed to get dataframes: {:?}", e))
     }
-    pub fn get_latest_buffer(&self) -> Vec<String> {
-        todo!()
-        // Get the latest incoming serialized buffer from the PDC server.
+
+    pub fn get_latest_buffer(&self) -> Result<Vec<u8>, String> {
+        // Create a one-shot channel for the response
+        let (response_tx, response_rx) = mpsc::channel();
+
+        // Send the request
+        let request_sent = {
+            if let Ok(tx_guard) = self.latest_buffer_request_tx.lock() {
+                if let Some(tx) = tx_guard.as_ref() {
+                    tx.send(response_tx).is_ok()
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+
+        if !request_sent {
+            return Err("Stream not started or request channel not available".to_string());
+        }
+
+        // Wait for the response with a timeout
+        match response_rx.recv_timeout(std::time::Duration::from_secs(1)) {
+            Ok(buffer) => {
+                if buffer.is_empty() {
+                    Err("No data frames available yet".to_string())
+                } else {
+                    Ok(buffer)
+                }
+            }
+            Err(_) => Err("Timeout waiting for latest buffer".to_string()),
+        }
+    }
+
+    pub fn get_channel_location(&self, channel_name: &str) -> Option<(u16, u8)> {
+        // Find the accumulator config for the given channel name
+        self._accumulators
+            .iter()
+            .find(|config| config.name == channel_name)
+            .map(|config| (config.var_loc, config.var_len))
     }
 }

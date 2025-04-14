@@ -5,9 +5,13 @@ name = "rtpa_core"
 version = "0.0.1"
 edition = "2021"
 
+[lib]
+name = "rtpa_core"
+crate-type = ["cdylib", "rlib"]
+
 
 [dependencies]
-arrow = { version = "54.3.1", features = ["ipc"] }
+arrow = { version = "54.3.1", features = ["ipc", "pyarrow"] }
 axum = "0.7.7"
 bytes = "1.7.1"
 chrono = { version = "0.4.40", features = ["serde"] }
@@ -22,6 +26,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 core_affinity = "0.8.3"
 rayon = "1.10.0"
+pyo3 = { version = "0.23.3", features = ["extension-module"] }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

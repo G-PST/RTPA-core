@@ -60,7 +60,35 @@ mod tests {
 
         // Wait for a few seconds to allow data to flow
         thread::sleep(Duration::from_secs(3));
+        // Get data from the buffer and check that it's not empty
+        println!("Getting data from buffer");
+        let data_result = pdc_buffer.get_data(None, Some(3));
 
+        // Check that we got data successfully
+        assert!(
+            data_result.is_ok(),
+            "Failed to get data from PDC buffer: {:?}",
+            data_result.err()
+        );
+
+        let data = data_result.unwrap();
+
+        // Print the row count for verification
+        println!("Retrieved data with {} rows", data.num_rows());
+
+        // Verify that we got at least some data
+        assert!(data.num_rows() > 0, "Retrieved data has 0 rows");
+
+        // Print schema and column info
+        println!("Schema: {:?}", data.schema());
+        for i in 0..data.num_columns() {
+            println!(
+                "Column {}: {} with {} rows",
+                i,
+                data.schema().field(i).name(),
+                data.column(i).len()
+            );
+        }
         // Stop the stream
         println!("Stopping Stream");
         pdc_buffer.stop_stream();

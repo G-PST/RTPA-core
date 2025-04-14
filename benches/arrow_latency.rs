@@ -5,48 +5,12 @@
 //
 // Ultimate test. A Buffer size of 55 * 1024 bytes, 120 seconds of data, and 2000 columns
 //
-use arrow::datatypes::DataType;
+mod utils;
+use utils::{create_configs, create_test_buffer};
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use rtpa_core::accumulator::manager::{AccumulatorConfig, AccumulatorManager};
+use rtpa_core::accumulator::manager::AccumulatorManager;
 use std::time::Duration;
-
-// Helper function to create a test buffer
-fn create_test_buffer(size: usize) -> Vec<u8> {
-    let mut buffer = vec![0u8; size];
-    for i in 0..size {
-        buffer[i] = (i % 256) as u8;
-    }
-    buffer
-}
-
-// Helper function to create a set of configs with varying numbers of columns
-fn create_configs(num_columns: usize) -> Vec<AccumulatorConfig> {
-    let mut configs = Vec::with_capacity(num_columns);
-
-    for i in 0..num_columns {
-        let var_type = match i % 3 {
-            0 => DataType::Float32,
-            1 => DataType::Int32,
-            _ => DataType::UInt16,
-        };
-
-        let var_len = match var_type {
-            DataType::Float32 => 4,
-            DataType::Int32 => 4,
-            DataType::UInt16 => 2,
-            _ => panic!("Unsupported data type"),
-        };
-
-        configs.push(AccumulatorConfig {
-            var_loc: (i * 10) as u16, // Space out the variables in the buffer
-            var_len,
-            var_type,
-            name: format!("column_{}", i),
-        });
-    }
-
-    configs
-}
 
 // Benchmark for getting dataframes of different sizes
 fn bench_get_dataframe(c: &mut Criterion) {
@@ -73,8 +37,8 @@ fn bench_get_dataframe(c: &mut Criterion) {
             ),
             &(rows, cols_to_fetch, total_cols),
             |b, &(rows, cols_to_fetch, total_cols)| {
-                let configs = create_configs(total_cols);
-                let manager = AccumulatorManager::new(configs, 2, 1000); // Allow more batches
+                let configs = create_configs(total_cols, buffer_size);
+                let mut manager = AccumulatorManager::new(configs, 1000); // Allow more batches
 
                 // Process the specified number of rows before starting the benchmark
                 for _ in 0..rows {
@@ -111,7 +75,7 @@ fn bench_time_window(c: &mut Criterion) {
     let buffer_size = 1024;
     let test_buffer = create_test_buffer(buffer_size);
     let num_columns = 10;
-    let configs = create_configs(num_columns);
+    let configs = create_configs(num_columns, buffer_size);
 
     // Process 600 rows (10 seconds at 60Hz)
     let rows_to_process = 600;
@@ -124,7 +88,7 @@ fn bench_time_window(c: &mut Criterion) {
             BenchmarkId::new("window_seconds", window_size),
             &window_size,
             |b, &window| {
-                let manager = AccumulatorManager::new(configs.clone(), 2, 1000);
+                let mut manager = AccumulatorManager::new(configs.clone(), 1000);
 
                 // Process the specified number of rows before benchmarking
                 for _ in 0..rows_to_process {
@@ -153,57 +117,25 @@ fn bench_time_window(c: &mut Criterion) {
     group.finish();
 }
 
-// Benchmark process_buffer separately
-fn bench_process_buffer(c: &mut Criterion) {
-    let mut group = c.benchmark_group("process_buffer");
-    group.measurement_time(Duration::from_secs(10));
-
-    let buffer_size = 1024;
-    let test_buffer = create_test_buffer(buffer_size);
-
-    for &num_columns in &[5, 10, 20] {
-        group.bench_with_input(
-            BenchmarkId::new("columns", num_columns),
-            &num_columns,
-            |b, &cols| {
-                let configs = create_configs(cols);
-                let manager = AccumulatorManager::new(configs, 2, 240);
-
-                b.iter(|| {
-                    manager
-                        .process_buffer(|buffer| {
-                            let len = std::cmp::min(buffer.len(), test_buffer.len());
-                            buffer[..len].copy_from_slice(&test_buffer[..len]);
-                            len
-                        })
-                        .unwrap();
-                });
-
-                manager.shutdown();
-            },
-        );
-    }
-
-    group.finish();
-}
-
-// Benchmark thread count impact on dataframe creation
-fn bench_thread_count(c: &mut Criterion) {
-    let mut group = c.benchmark_group("thread_count_dataframe");
+// Benchmark different column counts for dataframe creation
+fn bench_column_count(c: &mut Criterion) {
+    let mut group = c.benchmark_group("column_count_dataframe");
     group.measurement_time(Duration::from_secs(15));
 
     let buffer_size = 1024;
     let test_buffer = create_test_buffer(buffer_size);
-    let num_columns = 20;
-    let rows_to_process = 300; // 5 seconds of data at 60Hz
+    let rows_to_process = 300; // 5 seconds at 60Hz
 
-    for &thread_count in &[1, 2, 4, 8] {
+    // Test different column counts
+    let column_counts = vec![10, 50, 100, 500, 1000];
+
+    for &col_count in &column_counts {
         group.bench_with_input(
-            BenchmarkId::new("threads", thread_count),
-            &thread_count,
-            |b, &threads| {
-                let configs = create_configs(num_columns);
-                let manager = AccumulatorManager::new(configs.clone(), threads, 1000);
+            BenchmarkId::new("columns", col_count),
+            &col_count,
+            |b, &cols| {
+                let configs = create_configs(cols, buffer_size);
+                let mut manager = AccumulatorManager::new(configs.clone(), 1000);
 
                 // Process data before benchmarking
                 for _ in 0..rows_to_process {
@@ -216,8 +148,9 @@ fn bench_thread_count(c: &mut Criterion) {
                         .unwrap();
                 }
 
-                // Select all columns
-                let columns: Vec<usize> = (0..num_columns).collect();
+                // Select 10% of the columns or at least 5
+                let columns_to_fetch = std::cmp::max(5, cols / 10);
+                let columns: Vec<usize> = (0..columns_to_fetch).collect();
 
                 // Benchmark only the dataframe creation
                 b.iter(|| {
@@ -246,11 +179,11 @@ fn bench_ultimate_test(c: &mut Criterion) {
 
     // 2000 columns/sparse accumulators
     let num_columns = 2000;
-    let configs = create_configs(num_columns);
+    let configs = create_configs(num_columns, buffer_size);
 
     group.bench_function("max_load", |b| {
-        // Use 4 threads to handle the large workload
-        let manager = AccumulatorManager::new(configs.clone(), 4, 1000);
+        let mut manager =
+            AccumulatorManager::new_with_params(configs.clone(), 1000, buffer_size, 120);
 
         // Process 120 seconds of data at 60Hz = 7200 buffers before benchmarking
         for i in 0..7200 {
@@ -288,60 +221,10 @@ fn bench_ultimate_test(c: &mut Criterion) {
     group.finish();
 }
 
-// Benchmark different column counts for dataframe creation
-fn bench_column_count(c: &mut Criterion) {
-    let mut group = c.benchmark_group("column_count_dataframe");
-    group.measurement_time(Duration::from_secs(15));
-
-    let buffer_size = 1024;
-    let test_buffer = create_test_buffer(buffer_size);
-    let rows_to_process = 300; // 5 seconds at 60Hz
-
-    // Test different column counts
-    let column_counts = vec![10, 50, 100, 500, 1000];
-
-    for &col_count in &column_counts {
-        group.bench_with_input(
-            BenchmarkId::new("columns", col_count),
-            &col_count,
-            |b, &cols| {
-                let configs = create_configs(cols);
-                let manager = AccumulatorManager::new(configs.clone(), 2, 1000);
-
-                // Process data before benchmarking
-                for _ in 0..rows_to_process {
-                    manager
-                        .process_buffer(|buffer| {
-                            let len = std::cmp::min(buffer.len(), test_buffer.len());
-                            buffer[..len].copy_from_slice(&test_buffer[..len]);
-                            len
-                        })
-                        .unwrap();
-                }
-
-                // Select 10% of the columns or at least 5
-                let columns_to_fetch = std::cmp::max(5, cols / 10);
-                let columns: Vec<usize> = (0..columns_to_fetch).collect();
-
-                // Benchmark only the dataframe creation
-                b.iter(|| {
-                    black_box(manager._get_dataframe(&columns, 5).unwrap());
-                });
-
-                manager.shutdown();
-            },
-        );
-    }
-
-    group.finish();
-}
-
 criterion_group!(
     benches,
     bench_get_dataframe,
     bench_time_window,
-    bench_thread_count,
-    bench_process_buffer,
     bench_column_count,
     bench_ultimate_test,
 );

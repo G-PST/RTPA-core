@@ -10,39 +10,6 @@ services:
       - "8280:8280"
       - "8900:8900"
 
-  pmu-server:
-    build: .
-    container_name: pmu-server
-    volumes: 
-      - ./logs:/usr/local/bin/logs
-    command:
-      [
-        "pmu",
-        "server",
-        "--pdc-ip",
-        "open-pdc",
-        "--pdc-port",
-        "8900",
-        "--pdc-idcode",
-        "235",
-        "--http-port",
-        "7734",
-        "--duration",
-        "120",
-      ]
-    ports:
-      - "7734:7734"
-    networks:
-      - pmu-network
-    restart: on-failure:3
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 15s
-        max_attempts: 3
-        window: 120s
-
-
 networks:
   pmu-network:
     driver: bridge

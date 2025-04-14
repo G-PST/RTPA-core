@@ -25,6 +25,10 @@ pub fn calculate_crc(buffer: &[u8]) -> u16 {
 
 // Extract frame type from sync bytes
 pub fn parse_frame_type(sync: u16) -> Result<FrameType, ParseError> {
+    // Verify first byte is 0xAA
+    if (sync >> 8) != 0xAA {
+        return Err(ParseError::InvalidFrameType);
+    }
     let frame_type_bits = (sync >> 4) & 0x7;
 
     match frame_type_bits {
@@ -53,9 +57,7 @@ pub fn parse_protocol_version(sync: u16) -> Result<VersionStandard, ParseError> 
         1 => VersionStandard::Ieee2005,
         2 => VersionStandard::Ieee2011,
         3 => VersionStandard::Ieee2024,
-        4..=15 => VersionStandard::Other(version_bits),
-        0 => return Err(ParseError::VersionNotSupported),
-        _ => unreachable!(), // Can't happen with 4 bits
+        _ => return Err(ParseError::VersionNotSupported),
     };
 
     Ok(version)
@@ -122,47 +124,58 @@ pub fn parse_phasor(
     }
 }
 
-// Updated tests
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[test]
+fn test_parse_frame_type() {
+    // Test all valid frame types with correct bit patterns
+    let test_cases = [
+        (0xAA00, FrameType::Data),    // Data frame (000)
+        (0xAA10, FrameType::Header),  // Header frame (001)
+        (0xAA20, FrameType::Config1), // Config1 frame (010)
+        (0xAA30, FrameType::Config2), // Config2 frame (011)
+        (0xAA40, FrameType::Command), // Command frame (100)
+        (0xAA50, FrameType::Config3), // Config3 frame (101)
+    ];
 
-    #[test]
-    fn test_parse_frame() {
-        // AA41 = Data frame (000), Version 1 (0001)
-        assert_eq!(
-            parse_protocol_version(0xAA41).unwrap(),
-            VersionStandard::Ieee2005
+    for (sync, expected_type) in test_cases {
+        let frame_type_bits = (sync >> 4) & 0x7;
+        println!(
+            "Testing sync: 0x{:04X}, frame_type_bits: {}, expected type: {:?}",
+            sync, frame_type_bits, expected_type
         );
 
-        // AA62 = Config1 frame (010), Version 2 (0010)
-        assert_eq!(
-            parse_protocol_version(0xAA62).unwrap(),
-            VersionStandard::Ieee2011
+        match parse_frame_type(sync) {
+            Ok(frame_type) => {
+                assert_eq!(frame_type, expected_type);
+            }
+            Err(e) => {
+                panic!(
+                    "Failed to parse valid frame type from 0x{:04X}: {:?}",
+                    sync, e
+                );
+            }
+        }
+    }
+
+    // Test invalid frame types (110 and 111)
+    let invalid_types = [0xAA60, 0xAA70];
+    for sync in invalid_types {
+        let frame_type_bits = (sync >> 4) & 0x7;
+        println!(
+            "Testing invalid sync: 0x{:04X}, frame_type_bits: {}",
+            sync, frame_type_bits
         );
 
-        // AAB3 = Config3 frame (101), Version 3 (0011)
-        assert_eq!(
-            parse_protocol_version(0xAAB3).unwrap(),
-            VersionStandard::Ieee2024
-        );
-
-        // AA80 = Invalid (reserved bit 7 set)
         assert!(matches!(
-            parse_frame_type(0xAA80),
-            Err(ParseError::InvalidHeader)
-        ));
-
-        // AA70 = Invalid frame type (111)
-        assert!(matches!(
-            parse_frame_type(0xAA70),
+            parse_frame_type(sync),
             Err(ParseError::InvalidFrameType)
         ));
-
-        // AA00 = Invalid version (0000)
-        assert!(matches!(
-            parse_frame_type(0xAA00),
-            Err(ParseError::VersionNotSupported)
-        ));
     }
+
+    // Test invalid sync byte (not 0xAA)
+    let invalid_sync = 0xBB00;
+    println!("Testing invalid sync byte: 0x{:04X}", invalid_sync);
+    assert!(matches!(
+        parse_frame_type(invalid_sync),
+        Err(ParseError::InvalidFrameType)
+    ));
 }
