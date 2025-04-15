@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use super::common::{ParseError, PrefixFrame, Version};
 use super::utils::{calculate_crc, validate_checksum};
 use serde::{Deserialize, Serialize};

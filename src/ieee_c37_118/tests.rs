@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 #[cfg(test)]
 mod unified_tests {
     use crate::ieee_c37_118::commands::{CommandFrame, CommandType};

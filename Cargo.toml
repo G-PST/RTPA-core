@@ -24,10 +24,8 @@ tower-http = "0.6.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-core_affinity = "0.8.3"
 rayon = "1.10.0"
 pyo3 = { version = "0.23.3", features = ["extension-module"] }
-rand = "0.8"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
@@ -36,7 +34,8 @@ tokio = { version = "1.0", features = ["full"] }
 chrono = { version = "0.4.40", features = ["serde"] }
 arrow = { version = "54.3.1", features = ["ipc"] }
 num_cpus = "1.16.0"
-rand = "0.8"
+random = "0.14.0"
+rand = "0.9.0"
 
 
 [[bench]]
@@ -47,9 +46,6 @@ harness = false
 name = "accumulator_throughput"
 harness = false
 
-#[[test]]
-#name = "e2e_test"
-#path = "tests/e2e_test.rs"
 
 [[test]]
 name = "integration_test"

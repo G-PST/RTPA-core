@@ -1,4 +1,5 @@
 // Unified PMUConfigurationFrame
+#![allow(unused)]
 use super::common::{ChannelDataType, ChannelInfo, ParseError, PrefixFrame, Version};
 use super::utils::validate_checksum;
 use serde::{Deserialize, Serialize};

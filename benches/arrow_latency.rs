@@ -9,6 +9,7 @@ mod utils;
 use utils::{create_configs, create_test_buffer};
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use rand::Rng;
 use rtpa_core::accumulator::manager::AccumulatorManager;
 use std::time::Duration;
 
@@ -173,10 +174,10 @@ fn bench_ultimate_test(c: &mut Criterion) {
         for _ in 0..7200 {
             manager.process_buffer(&test_buffer).unwrap();
         }
-
+        let mut rng = rand::rng();
         // Query for 1000 random columns from the last 120 seconds
         let mut columns: Vec<usize> = (0..1000)
-            .map(|_| rand::random::<usize>() % num_columns)
+            .map(|_| rng.random_range(0..num_columns))
             .collect();
         columns.sort(); // Sort to avoid duplicates in the benchmark
         columns.dedup();

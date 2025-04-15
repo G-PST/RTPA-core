@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 /// Represents a data frame from IEEE C37.118
 use super::common::{ChannelDataType, ParseError, PrefixFrame, StatField};
 use super::config::ConfigurationFrame;

@@ -1,3 +1,4 @@
+#![allow(unused)]
 use std::error::Error;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -90,9 +91,9 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
     let stream_interval = Duration::from_secs_f64(1.0 / config.data_rate);
 
     // Read test files once at the start
-    let config_frame = read_test_file("config_message.bin")
+    let _config_frame = read_test_file("config_message.bin")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-    let mut data_frame = read_test_file("data_message.bin")
+    let data_frame = read_test_file("data_message.bin")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
     // Buffer for reading commands

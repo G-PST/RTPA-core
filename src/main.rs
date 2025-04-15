@@ -6,6 +6,7 @@ mod pdc_client;
 mod pdc_server;
 use clap::{Parser, Subcommand};
 //use log::info;
+mod ieee_c37_118;
 use pdc_server::{run_mock_server, Protocol, ServerConfig};
 use tokio::io;
 #[derive(Debug, Parser)] // requires `derive` feature
