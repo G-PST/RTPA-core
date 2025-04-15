@@ -16,8 +16,8 @@ pub enum CommandType {
     TurnOffTransmission = 1,
     TurnOnTransmission = 2,
     SendHeaderFrame = 3,
-    SendConfigFrame1 = 5,
-    SendConfigFrame2 = 4,
+    SendConfigFrame1 = 4,
+    SendConfigFrame2 = 5,
     SendConfigFrame3 = 6,
     SendExtendedFrame = 8,
 }

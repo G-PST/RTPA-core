@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use rtpa_core::ieee_c37_118::Version;
+    use rtpa_core::ieee_c37_118::common::Version;
     use rtpa_core::pdc_buffer::PDCBuffer;
     use rtpa_core::pdc_server::{run_mock_server, Protocol, ServerConfig};
 

@@ -1,19 +1,19 @@
-use crate::ieee_c37_118::commands::{CommandFrame, CommandType};
-use crate::ieee_c37_118::utils::calculate_crc;
-
 use std::error::Error;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::{self, Duration};
+
+use crate::ieee_c37_118::commands::{CommandFrame, CommandType};
+use crate::ieee_c37_118::utils::calculate_crc;
+
+use std::fs;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub enum Protocol {
     TCP,
     UDP,
 }
-
-use std::fs;
-use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
