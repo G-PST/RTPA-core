@@ -3,6 +3,7 @@ use std::fmt;
 // Public modules
 pub mod frames;
 pub mod models;
+pub mod random;
 pub mod utils;
 // Version-specific implementations
 pub mod frames_v2;

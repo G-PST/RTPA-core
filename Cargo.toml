@@ -27,6 +27,7 @@ tracing-appender = "0.2"
 core_affinity = "0.8.3"
 rayon = "1.10.0"
 pyo3 = { version = "0.23.3", features = ["extension-module"] }
+rand = "0.8"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

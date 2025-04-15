@@ -109,18 +109,12 @@ impl AccumulatorManager {
         )
     }
 
-    pub fn process_buffer<F>(&mut self, writer: F) -> Result<(), String>
-    where
-        F: FnOnce(&mut Vec<u8>) -> usize,
-    {
-        let mut input_buffer = vec![0u8; self.buffer_size];
-        let written = writer(&mut input_buffer);
-
-        if written > self.buffer_size {
-            return Err("Written data exceeds max buffer size".to_string());
+    pub fn process_buffer(&mut self, data: &[u8]) -> Result<(), String> {
+        if data.len() > self.buffer_size {
+            return Err("Data exceeds max buffer size".to_string());
         }
 
-        if written == 0 {
+        if data.is_empty() {
             return Err("No data written to buffer".to_string());
         }
 
@@ -158,7 +152,7 @@ impl AccumulatorManager {
             .zip(accumulators.par_iter())
             .for_each(|(buffer, acc)| {
                 let mut buffer_guard = buffer.lock().unwrap();
-                acc.accumulate(&input_buffer[..written], &mut buffer_guard);
+                acc.accumulate(data, &mut buffer_guard);
             });
 
         self.batch_index += 1;
@@ -449,12 +443,7 @@ mod tests {
 
         let n = 5;
         for _ in 0..n {
-            manager
-                .process_buffer(|buf| {
-                    buf[..input_buffer.len()].copy_from_slice(&input_buffer);
-                    input_buffer.len()
-                })
-                .unwrap();
+            manager.process_buffer(&input_buffer).unwrap();
         }
 
         // Get data frame will flush the pending batch
@@ -504,13 +493,10 @@ mod tests {
 
         let mut manager = AccumulatorManager::new_with_params(configs, 10, 16, 5);
 
-        let result = manager.process_buffer(|_| 0);
+        let empty_buffer: &[u8] = &[];
+        let result = manager.process_buffer(empty_buffer);
         assert!(result.is_err(), "Empty buffer should return error");
-        assert_eq!(
-            result.unwrap_err(),
-            "No data written to buffer",
-            "Correct error message for empty buffer"
-        );
+        assert_eq!(result.unwrap_err(), "No data written to buffer",);
 
         let dataframe = manager.get_dataframe(None, None).unwrap();
         assert_eq!(dataframe.num_rows(), 0, "Dataframe should be empty");
@@ -527,27 +513,37 @@ mod tests {
 
         let mut manager = AccumulatorManager::new_with_params(configs.clone(), 10, 16, 5);
 
+        let input_buffer = [0x41, 0x20, 0x00, 0x00];
         // Process some data
-        manager
-            .process_buffer(|buf| {
-                buf[..4].copy_from_slice(&[0x41, 0x20, 0x00, 0x00]);
-                4
-            })
-            .unwrap();
+        manager.process_buffer(&input_buffer).unwrap();
 
         // Shutdown should flush any pending batches
         manager.shutdown();
 
         // Create a new manager
         let mut new_manager = AccumulatorManager::new_with_params(configs, 10, 16, 5);
-        let result = new_manager.process_buffer(|buf| {
-            buf[..4].copy_from_slice(&[0x41, 0x20, 0x00, 0x00]);
-            4
-        });
+        let result = new_manager.process_buffer(&input_buffer);
 
         assert!(
             result.is_ok(),
             "Process buffer should succeed on a new manager"
+        );
+    }
+    #[test]
+    fn test_process_buffer_too_large() {
+        let configs = vec![AccumulatorConfig {
+            var_loc: 0,
+            var_len: 4,
+            var_type: DataType::Float32,
+            name: "float_col".to_string(),
+        }];
+        let mut manager = AccumulatorManager::new_with_params(configs, 10, 4, 5);
+        let input_buffer = vec![0u8; 5]; // Larger than buffer_size (4)
+        let result = manager.process_buffer(&input_buffer);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Data exceeds max buffer size".to_string()
         );
     }
 
@@ -567,12 +563,7 @@ mod tests {
 
         // Process exactly batch_size items to trigger a full batch
         for _ in 0..3 {
-            manager
-                .process_buffer(|buf| {
-                    buf[..input_buffer.len()].copy_from_slice(&input_buffer);
-                    input_buffer.len()
-                })
-                .unwrap();
+            manager.process_buffer(&input_buffer).unwrap();
         }
 
         // This should have created a batch
@@ -582,12 +573,7 @@ mod tests {
         }
 
         // Process one more to start a new batch
-        manager
-            .process_buffer(|buf| {
-                buf[..input_buffer.len()].copy_from_slice(&input_buffer);
-                input_buffer.len()
-            })
-            .unwrap();
+        manager.process_buffer(&input_buffer).unwrap();
 
         // Flush the pending batch
         manager.flush_pending_batch();

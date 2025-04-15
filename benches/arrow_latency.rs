@@ -42,13 +42,7 @@ fn bench_get_dataframe(c: &mut Criterion) {
 
                 // Process the specified number of rows before starting the benchmark
                 for _ in 0..rows {
-                    manager
-                        .process_buffer(|buffer| {
-                            let len = std::cmp::min(buffer.len(), test_buffer.len());
-                            buffer[..len].copy_from_slice(&test_buffer[..len]);
-                            len
-                        })
-                        .unwrap();
+                    manager.process_buffer(&test_buffer).unwrap();
                 }
 
                 // Create a vector of column indices to fetch
@@ -92,13 +86,7 @@ fn bench_time_window(c: &mut Criterion) {
 
                 // Process the specified number of rows before benchmarking
                 for _ in 0..rows_to_process {
-                    manager
-                        .process_buffer(|buffer| {
-                            let len = std::cmp::min(buffer.len(), test_buffer.len());
-                            buffer[..len].copy_from_slice(&test_buffer[..len]);
-                            len
-                        })
-                        .unwrap();
+                    manager.process_buffer(&test_buffer).unwrap();
                 }
 
                 // Select half the columns
@@ -139,13 +127,7 @@ fn bench_column_count(c: &mut Criterion) {
 
                 // Process data before benchmarking
                 for _ in 0..rows_to_process {
-                    manager
-                        .process_buffer(|buffer| {
-                            let len = std::cmp::min(buffer.len(), test_buffer.len());
-                            buffer[..len].copy_from_slice(&test_buffer[..len]);
-                            len
-                        })
-                        .unwrap();
+                    manager.process_buffer(&test_buffer).unwrap();
                 }
 
                 // Select 10% of the columns or at least 5
@@ -166,6 +148,8 @@ fn bench_column_count(c: &mut Criterion) {
 }
 
 // Ultimate test focusing only on dataframe creation
+// TODO This is measuring the accumulator and the dataframe creation.
+// this probably duplicates the columns/X benchmark.
 fn bench_ultimate_test(c: &mut Criterion) {
     let mut group = c.benchmark_group("ultimate_test_dataframe");
 
@@ -186,21 +170,8 @@ fn bench_ultimate_test(c: &mut Criterion) {
             AccumulatorManager::new_with_params(configs.clone(), 1000, buffer_size, 120);
 
         // Process 120 seconds of data at 60Hz = 7200 buffers before benchmarking
-        for i in 0..7200 {
-            manager
-                .process_buffer(|buffer| {
-                    // For performance, we'll modify every 10th buffer to simulate changing data
-                    if i % 10 == 0 {
-                        for j in 0..buffer.len().min(test_buffer.len()) {
-                            buffer[j] = test_buffer[(j + i) % test_buffer.len()];
-                        }
-                    } else {
-                        let len = buffer.len().min(test_buffer.len());
-                        buffer[..len].copy_from_slice(&test_buffer[..len]);
-                    }
-                    buffer.len().min(test_buffer.len())
-                })
-                .unwrap();
+        for _ in 0..7200 {
+            manager.process_buffer(&test_buffer).unwrap();
         }
 
         // Query for 1000 random columns from the last 120 seconds

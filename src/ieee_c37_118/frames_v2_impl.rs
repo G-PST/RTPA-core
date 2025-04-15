@@ -282,6 +282,71 @@ impl ConfigurationFrame for ConfigurationFrame1and2_2011 {
 
         result
     }
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        // Add prefix frame
+        bytes.extend_from_slice(&self.prefix.to_hex());
+
+        // Add TIME_BASE (4 bytes)
+        bytes.extend_from_slice(&self.time_base.to_be_bytes());
+
+        // Add NUM_PMU (2 bytes)
+        bytes.extend_from_slice(&self.num_pmu.to_be_bytes());
+
+        // Add PMU configurations
+        for pmu in &self.pmu_configs {
+            // STN (16 bytes)
+            bytes.extend_from_slice(&pmu.stn);
+
+            // IDCODE (2 bytes)
+            bytes.extend_from_slice(&pmu.idcode.to_be_bytes());
+
+            // FORMAT (2 bytes)
+            bytes.extend_from_slice(&pmu.format.to_be_bytes());
+
+            // PHNMR (2 bytes)
+            bytes.extend_from_slice(&pmu.phnmr.to_be_bytes());
+
+            // ANNMR (2 bytes)
+            bytes.extend_from_slice(&pmu.annmr.to_be_bytes());
+
+            // DGNMR (2 bytes)
+            bytes.extend_from_slice(&pmu.dgnmr.to_be_bytes());
+
+            // CHNAM
+            bytes.extend_from_slice(&pmu.chnam);
+
+            // PHUNIT
+            for unit in &pmu.phunit {
+                bytes.extend_from_slice(&unit.to_be_bytes());
+            }
+
+            // ANUNIT
+            for unit in &pmu.anunit {
+                bytes.extend_from_slice(&unit.to_be_bytes());
+            }
+
+            // DIGUNIT
+            for unit in &pmu.digunit {
+                bytes.extend_from_slice(&unit.to_be_bytes());
+            }
+
+            // FNOM (2 bytes)
+            bytes.extend_from_slice(&pmu.fnom.to_be_bytes());
+
+            // CFGCNT (2 bytes)
+            bytes.extend_from_slice(&pmu.cfgcnt.to_be_bytes());
+        }
+
+        // DATA_RATE (2 bytes)
+        bytes.extend_from_slice(&self.data_rate.to_be_bytes());
+
+        // Add checksum
+        bytes.extend_from_slice(&self.chk.to_be_bytes());
+
+        bytes
+    }
 
     fn prefix(&self) -> &dyn PrefixFrame {
         &self.prefix
@@ -573,7 +638,61 @@ impl DataFrame for DataFrame2011 {
             chk,
         })
     }
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
 
+        // Add prefix
+        bytes.extend_from_slice(&self.prefix.to_hex());
+
+        // Add PMU data
+        for pmu in &self.data {
+            match pmu {
+                PMUFrameType::Floating(data) => {
+                    // STAT
+                    bytes.extend_from_slice(&data.stat.to_be_bytes());
+
+                    // Phasors
+                    bytes.extend_from_slice(&data.phasors);
+
+                    // FREQ (4 bytes for float)
+                    bytes.extend_from_slice(&data.freq.to_be_bytes());
+
+                    // DFREQ (4 bytes for float)
+                    bytes.extend_from_slice(&data.dfreq.to_be_bytes());
+
+                    // Analog data
+                    bytes.extend_from_slice(&data.analog);
+
+                    // Digital data
+                    bytes.extend_from_slice(&data.digital);
+                }
+                PMUFrameType::Fixed(data) => {
+                    // STAT
+                    bytes.extend_from_slice(&data.stat.to_be_bytes());
+
+                    // Phasors
+                    bytes.extend_from_slice(&data.phasors);
+
+                    // FREQ (2 bytes for fixed)
+                    bytes.extend_from_slice(&data.freq.to_be_bytes());
+
+                    // DFREQ (2 bytes for fixed)
+                    bytes.extend_from_slice(&data.dfreq.to_be_bytes());
+
+                    // Analog data
+                    bytes.extend_from_slice(&data.analog);
+
+                    // Digital data
+                    bytes.extend_from_slice(&data.digital);
+                }
+            }
+        }
+
+        // Add checksum
+        bytes.extend_from_slice(&self.chk.to_be_bytes());
+
+        bytes
+    }
     fn prefix(&self) -> &dyn PrefixFrame {
         &self.prefix
     }

@@ -92,11 +92,7 @@ fn test_ieee_c37_118_e2e() {
         println!("Processing data frame {}", i + 1);
 
         // Use closure to write the data to the buffer
-        let result = accumulator_manager.process_buffer(|buffer| {
-            buffer.clear();
-            buffer.extend_from_slice(&data_buffer);
-            data_buffer.len()
-        });
+        let result = accumulator_manager.process_buffer(&data_buffer);
 
         assert!(
             result.is_ok(),

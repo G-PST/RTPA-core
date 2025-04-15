@@ -1,13 +1,7 @@
 // The PDCBuffer aims to be a centralized module for interacting with a PDC server.
 // It provides a convenient interface for managing the connection to the PDC server,
 // parsing the configuration, and managing the data stream.
-//
-// A window of data is kept in memory for fast queries.
-//
-// The module should be structured in a way that it can be imported as a python module.
-//
-#[allow(unused)]
-#[allow(unused_variables)]
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
@@ -27,6 +21,8 @@ use crate::ieee_c37_118::{parse_configuration_frame, FrameType};
 use crate::utils::config_to_accumulators;
 
 const DEFAULT_STANDARD: VersionStandard = VersionStandard::Ieee2011;
+const DEFAULT_MAX_BATCHES: usize = 120; // ~4 minutes at 60hz
+const DEFAULT_BATCH_SIZE: usize = 128; // ~2 seconds of data at 60hz
 
 pub struct PDCBuffer {
     pub ip_addr: String,
@@ -35,7 +31,8 @@ pub struct PDCBuffer {
     _accumulators: Vec<AccumulatorConfig>,
     _accumulator_manager: Arc<Mutex<AccumulatorManager>>, // Thread safe manager.
     pub ieee_version: VersionStandard,                    // The ieee standard version 1&2 or 3
-    pub config_frame: Box<dyn ConfigurationFrame>,        // The configuration frame of the PDC
+    pub config_frame: Box<dyn ConfigurationFrame>,
+    _data_frame_size: usize,
     _batch_size: usize,
     _channels: Vec<String>,
     _pmus: Vec<String>,
@@ -49,7 +46,14 @@ pub struct PDCBuffer {
 impl PDCBuffer {
     // Methods go here
 
-    pub fn new(ip_addr: String, port: u16, id_code: u16, version: Option<VersionStandard>) -> Self {
+    pub fn new(
+        ip_addr: String,
+        port: u16,
+        id_code: u16,
+        version: Option<VersionStandard>,
+        batch_size: Option<usize>,
+        max_batches: Option<usize>,
+    ) -> Self {
         // try to connect to the tcp socket.
         //
         // If connected, send command frame to request the PDC configuration and header.
@@ -76,12 +80,8 @@ impl PDCBuffer {
 
         stream.write_all(&send_config_cmd).unwrap();
 
-        // TODO we need to look at the first few bytes to determin the total size and version.
-        // We also need to see if this is a large enough size for the maximum configuration
-        // frame size.
-        let mut peek_buffer: [u8; 4] = [0u8; 4];
-
         // Read the SYNC and Frame Size of the configuration frame.
+        let mut peek_buffer: [u8; 4] = [0u8; 4];
         stream.read_exact(&mut peek_buffer).unwrap();
 
         let sync = u16::from_be_bytes([peek_buffer[0], peek_buffer[1]]);
@@ -93,20 +93,18 @@ impl PDCBuffer {
         println!("Version: {}", detected_version);
 
         let frame_size = u16::from_be_bytes([peek_buffer[2], peek_buffer[3]]);
-        println!("Frame size: {}", frame_size);
         // ensure frame size is less than 56 kB
         if frame_size > 56 * 1024 {
             panic!("Frame size exceeds maximum allowable limit of 56KB!")
         }
 
         let remaining_size = frame_size as usize - 4;
-        println!("Remaining size {}", remaining_size);
+
         let mut remaining_buffer = vec![0u8; remaining_size];
-        println!("created buffer of length {}", remaining_buffer.len());
+
         // read the entire buffer up to frame_size
         stream.read_exact(&mut remaining_buffer).unwrap();
 
-        println!("filled buffer with {} bytes", remaining_buffer.len());
         // Combine the peek and remaining buffers
         let mut buffer = Vec::with_capacity(frame_size as usize);
         buffer.extend_from_slice(&peek_buffer); // Add the first 4 bytes
@@ -115,19 +113,16 @@ impl PDCBuffer {
         // Parse the bytes into the ConfigurationFrame struct, depending on the version.
         let config_frame: Box<dyn ConfigurationFrame> = parse_configuration_frame(&buffer).unwrap();
 
-        // Once parsed, get the ChannelInfo and convert to a complete vec of available AccumulatorConfigs.
-        // TODO, this needs to be updated to use new_with_params()
+        // Determine data frame size expected by the configuration frame
+        let data_frame_size = config_frame.calc_data_frame_size();
 
         let accumulators = config_to_accumulators(&*config_frame);
 
         let accumulator_manager = AccumulatorManager::new_with_params(
             accumulators.clone(),
-            60 * 2, // TODO add parameter to adjust the window
-            // Should look at config frequency and input parameter to initialize window.
-            // Would be nice to have an option to extend the window while it is still running.
-            55 * 1024, // TODO determine max buffer size based on ConfigurationFrame.
-            // Alternatively, could look at largest AccumulatorConfig var_loc + size to determine endpoint.
-            128,
+            max_batches.unwrap_or(DEFAULT_MAX_BATCHES),
+            data_frame_size,
+            batch_size.unwrap_or(DEFAULT_BATCH_SIZE),
         );
 
         println!("RTPA Buffer Initialization Successful");
@@ -139,6 +134,7 @@ impl PDCBuffer {
             _accumulator_manager: Arc::new(Mutex::new(accumulator_manager)),
             ieee_version: version.unwrap_or(DEFAULT_STANDARD),
             config_frame,
+            _data_frame_size: data_frame_size,
             _batch_size: 120,
             _channels: vec![],
             _pmus: vec![],
@@ -182,6 +178,8 @@ impl PDCBuffer {
             *tx_guard = Some(buffer_request_tx);
         }
 
+        let data_frame_size = self._data_frame_size;
+
         let producer = {
             let mut stream = stream.try_clone().unwrap();
             thread::spawn(move || {
@@ -192,7 +190,7 @@ impl PDCBuffer {
 
                 let mut peek_buffer = [0u8; 4];
                 // TODO we should know the size of this frame after reading the configuration.
-                let mut current_frame_buffer = Vec::new();
+                let mut current_frame_buffer = vec![0u8; data_frame_size];
 
                 loop {
                     if let Ok(response_tx) = buffer_request_rx.try_recv() {
@@ -210,8 +208,11 @@ impl PDCBuffer {
                         Ok(()) => {
                             let frame_size =
                                 u16::from_be_bytes([peek_buffer[2], peek_buffer[3]]) as usize;
-                            if frame_size > 56 * 1024 {
-                                println!("Invalid frame size: {}", frame_size);
+                            if frame_size != data_frame_size {
+                                println!(
+                                    "Unexpected frame size: {}. Expected {}",
+                                    frame_size, data_frame_size
+                                );
                                 continue;
                             }
 
@@ -222,9 +223,6 @@ impl PDCBuffer {
                             if frame_size > 4 {
                                 match stream.read_exact(&mut current_frame_buffer[4..]) {
                                     Ok(()) => {
-                                        // Save this as our latest frame
-                                        //
-
                                         if tx.send(current_frame_buffer.clone()).is_err() {
                                             println!("Consumer disconnected");
                                             break;
@@ -254,11 +252,6 @@ impl PDCBuffer {
         let consumer = {
             thread::spawn(move || {
                 while let Ok(frame) = rx.recv() {
-                    if frame.len() >= 56 * 1024 {
-                        println!("Invalid frame size: {}", frame.len());
-                        continue;
-                    }
-                    // TODO add logic to validate CRC value before processing.
                     if validate_checksum(&frame) == false {
                         println!("Invalid Checksum, Skipping buffer.")
                     }
@@ -272,10 +265,7 @@ impl PDCBuffer {
                         }
                     };
 
-                    if let Err(e) = manager.process_buffer(|buf| {
-                        buf[..frame.len()].copy_from_slice(&frame);
-                        frame.len()
-                    }) {
+                    if let Err(e) = manager.process_buffer(&frame) {
                         println!("Error processing frame: {}", e);
                     }
                 }

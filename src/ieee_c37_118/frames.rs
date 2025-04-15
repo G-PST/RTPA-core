@@ -125,6 +125,8 @@ pub trait ConfigurationFrame: Frame + Send + Sync {
 
     fn to_json(&self) -> Result<String, serde_json::Error>;
 
+    fn to_bytes(&self) -> Vec<u8>;
+
     /// Create a new configuration frame from bytes
     fn from_bytes(bytes: &[u8]) -> Result<Self, ParseError>
     where
@@ -193,6 +195,8 @@ pub trait DataFrame: Frame + Send + Sync {
 
     /// Get all values from the data frame
     fn get_all_values(&self, config: &dyn ConfigurationFrame) -> HashMap<String, DataValue>;
+
+    fn to_bytes(&self) -> Vec<u8>;
 
     /// Create a new data frame from bytes using configuration information
     fn from_bytes(bytes: &[u8], config: &dyn ConfigurationFrame) -> Result<Self, ParseError>

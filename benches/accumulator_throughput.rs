@@ -42,13 +42,7 @@ fn bench_processing_throughput(c: &mut Criterion) {
 
                     // Measure how many buffers we can process per second
                     b.iter(|| {
-                        manager
-                            .process_buffer(|buffer| {
-                                let len = std::cmp::min(buffer.len(), test_buffer.len());
-                                buffer[..len].copy_from_slice(&test_buffer[..len]);
-                                len
-                            })
-                            .unwrap();
+                        manager.process_buffer(&test_buffer).unwrap();
                     });
 
                     manager.shutdown();
@@ -79,13 +73,7 @@ fn bench_buffer_size_impact(c: &mut Criterion) {
             let mut manager = AccumulatorManager::new_with_params(configs, 1000, size, 120);
 
             b.iter(|| {
-                manager
-                    .process_buffer(|buffer| {
-                        let len = std::cmp::min(buffer.len(), test_buffer.len());
-                        buffer[..len].copy_from_slice(&test_buffer[..len]);
-                        len
-                    })
-                    .unwrap();
+                manager.process_buffer(&test_buffer).unwrap();
             });
 
             manager.shutdown();
@@ -118,13 +106,7 @@ fn bench_sustained_throughput(c: &mut Criterion) {
 
             // Process buffers for the full duration
             while start.elapsed() < duration {
-                manager
-                    .process_buffer(|buffer| {
-                        let len = std::cmp::min(buffer.len(), test_buffer.len());
-                        buffer[..len].copy_from_slice(&test_buffer[..len]);
-                        len
-                    })
-                    .unwrap();
+                manager.process_buffer(&test_buffer).unwrap();
                 count += 1;
 
                 // Every 5000 buffers, report the current throughput
@@ -173,13 +155,7 @@ fn bench_ultimate_throughput(c: &mut Criterion) {
 
         // Warm up
         for _ in 0..100 {
-            manager
-                .process_buffer(|buffer| {
-                    let len = std::cmp::min(buffer.len(), test_buffer.len());
-                    buffer[..len].copy_from_slice(&test_buffer[..len]);
-                    len
-                })
-                .unwrap();
+            manager.process_buffer(&test_buffer).unwrap();
         }
 
         // Measure if we can sustain 240Hz (240 buffers per second)
@@ -192,13 +168,7 @@ fn bench_ultimate_throughput(c: &mut Criterion) {
 
             // Process at maximum speed and see if we can meet or exceed 240Hz
             for _ in 0..target_buffers {
-                manager
-                    .process_buffer(|buffer| {
-                        let len = std::cmp::min(buffer.len(), test_buffer.len());
-                        buffer[..len].copy_from_slice(&test_buffer[..len]);
-                        len
-                    })
-                    .unwrap();
+                manager.process_buffer(&test_buffer).unwrap();
             }
 
             let elapsed = start.elapsed();

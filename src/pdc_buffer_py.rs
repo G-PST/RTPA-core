@@ -19,8 +19,24 @@ impl PDCBufferPy {
         PDCBufferPy { inner: None }
     }
 
-    fn connect(&mut self, ip_addr: String, port: u16, id_code: u16) -> PyResult<()> {
-        self.inner = Some(PDCBuffer::new(ip_addr, port, id_code, None));
+    // TODO: Allow user to specify the desired version standard. PDCBuffer should fall back to default version (2011) if none is specified.
+    fn connect(
+        &mut self,
+        ip_addr: String,
+        port: u16,
+        id_code: u16,
+
+        batch_size: Option<usize>,
+        max_batches: Option<usize>,
+    ) -> PyResult<()> {
+        self.inner = Some(PDCBuffer::new(
+            ip_addr,
+            port,
+            id_code,
+            None,
+            batch_size,
+            max_batches,
+        ));
         Ok(())
     }
 

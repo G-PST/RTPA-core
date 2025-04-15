@@ -52,6 +52,8 @@ mod tests {
             4712,
             1, // ID code
             Some(VersionStandard::Ieee2011),
+            None,
+            None,
         );
 
         // Start the stream
