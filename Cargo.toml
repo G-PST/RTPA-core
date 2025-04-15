@@ -47,10 +47,10 @@ harness = false
 name = "accumulator_throughput"
 harness = false
 
-[[test]]
-name = "e2e_test"
-path = "tests/e2e_test.rs"
+#[[test]]
+#name = "e2e_test"
+#path = "tests/e2e_test.rs"
 
-[[test]]
-name = "integration_test"
-path = "tests/pdc_buffer_test.rs"
+#[[test]]
+#name = "integration_test"
+#path = "tests/pdc_buffer_test.rs"

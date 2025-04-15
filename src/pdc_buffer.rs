@@ -11,16 +11,15 @@ use std::thread::{self, JoinHandle};
 
 use arrow::record_batch::RecordBatch;
 
-use super::accumulator::manager::{AccumulatorConfig, AccumulatorManager};
-use super::ieee_c37_118::frames::ConfigurationFrame;
-use super::ieee_c37_118::utils::{parse_frame_type, parse_protocol_version};
-use super::ieee_c37_118::{serialize_command, Command, VersionStandard};
+use crate::accumulator::manager::{AccumulatorConfig, AccumulatorManager};
 
+use crate::ieee_c37_118::commands::CommandFrame;
+use crate::ieee_c37_118::common::{FrameType, Version};
+use crate::ieee_c37_118::config::ConfigurationFrame;
 use crate::ieee_c37_118::utils::validate_checksum;
-use crate::ieee_c37_118::{parse_configuration_frame, FrameType};
 use crate::utils::config_to_accumulators;
 
-const DEFAULT_STANDARD: VersionStandard = VersionStandard::Ieee2011;
+const DEFAULT_STANDARD: Version = Version::V2011;
 const DEFAULT_MAX_BATCHES: usize = 120; // ~4 minutes at 60hz
 const DEFAULT_BATCH_SIZE: usize = 128; // ~2 seconds of data at 60hz
 
@@ -30,8 +29,8 @@ pub struct PDCBuffer {
     pub id_code: u16,
     _accumulators: Vec<AccumulatorConfig>,
     _accumulator_manager: Arc<Mutex<AccumulatorManager>>, // Thread safe manager.
-    pub ieee_version: VersionStandard,                    // The ieee standard version 1&2 or 3
-    pub config_frame: Box<dyn ConfigurationFrame>,
+    pub ieee_version: Version,                            // The ieee standard version 1&2 or 3
+    pub config_frame: ConfigurationFrame,
     _data_frame_size: usize,
     _batch_size: usize,
     _channels: Vec<String>,
@@ -50,7 +49,7 @@ impl PDCBuffer {
         ip_addr: String,
         port: u16,
         id_code: u16,
-        version: Option<VersionStandard>,
+        version: Option<Version>,
         batch_size: Option<usize>,
         max_batches: Option<usize>,
     ) -> Self {
@@ -72,13 +71,9 @@ impl PDCBuffer {
         // TODO we need to implement a function to create the command frame based on version desired.
         // Default to version 1 and 2 for now.
         //
-        let send_config_cmd: Vec<u8> = serialize_command(
-            Command::SendConfig2,
-            version.unwrap_or(DEFAULT_STANDARD),
-            id_code,
-        );
+        let send_config_cmd = CommandFrame::new_send_config_frame2(id_code, None);
 
-        stream.write_all(&send_config_cmd).unwrap();
+        stream.write_all(&send_config_cmd.to_hex()).unwrap();
 
         // Read the SYNC and Frame Size of the configuration frame.
         let mut peek_buffer: [u8; 4] = [0u8; 4];
@@ -86,10 +81,10 @@ impl PDCBuffer {
 
         let sync = u16::from_be_bytes([peek_buffer[0], peek_buffer[1]]);
 
-        let frame_type: FrameType = parse_frame_type(sync).unwrap();
+        let frame_type: FrameType = FrameType::from_sync(sync).unwrap();
         println!("Detected Frame: {}", frame_type);
 
-        let detected_version: VersionStandard = parse_protocol_version(sync).unwrap();
+        let detected_version: Version = Version::from_sync(sync).unwrap();
         println!("Version: {}", detected_version);
 
         let frame_size = u16::from_be_bytes([peek_buffer[2], peek_buffer[3]]);
@@ -111,12 +106,15 @@ impl PDCBuffer {
         buffer.extend_from_slice(&remaining_buffer); // Add the rest
 
         // Parse the bytes into the ConfigurationFrame struct, depending on the version.
-        let config_frame: Box<dyn ConfigurationFrame> = parse_configuration_frame(&buffer).unwrap();
+        //
+        //
+
+        let config_frame: ConfigurationFrame = ConfigurationFrame::from_hex(&buffer).unwrap();
 
         // Determine data frame size expected by the configuration frame
         let data_frame_size = config_frame.calc_data_frame_size();
 
-        let accumulators = config_to_accumulators(&*config_frame);
+        let accumulators = config_to_accumulators(&config_frame);
 
         let accumulator_manager = AccumulatorManager::new_with_params(
             accumulators.clone(),
@@ -168,8 +166,7 @@ impl PDCBuffer {
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
         let consumer_manager = self._accumulator_manager.clone();
-        let start_stream_cmd =
-            serialize_command(Command::StartStream, self.ieee_version, self.id_code);
+        let start_stream_cmd = CommandFrame::new_turn_on_transmission(self.id_code, None);
 
         let (buffer_request_tx, buffer_request_rx) = mpsc::channel();
 
@@ -183,7 +180,7 @@ impl PDCBuffer {
         let producer = {
             let mut stream = stream.try_clone().unwrap();
             thread::spawn(move || {
-                if stream.write_all(&start_stream_cmd).is_err() {
+                if stream.write_all(&start_stream_cmd.to_hex()).is_err() {
                     println!("Failed to send START_STREAM command");
                     return;
                 }
@@ -287,9 +284,8 @@ impl PDCBuffer {
         }
 
         if let Ok(mut stream) = TcpStream::connect(format!("{}:{}", self.ip_addr, self.port)) {
-            let stop_stream_cmd =
-                serialize_command(Command::StopStream, self.ieee_version, self.id_code);
-            let _ = stream.write_all(&stop_stream_cmd);
+            let stop_stream_cmd = CommandFrame::new_turn_off_transmission(self.id_code, None);
+            let _ = stream.write_all(&stop_stream_cmd.to_hex());
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
 
@@ -306,7 +302,7 @@ impl PDCBuffer {
     }
 
     pub fn config_to_json(&self) -> Result<String, serde_json::Error> {
-        self.config_frame.to_json()
+        serde_json::to_string(&self.config_frame)
     }
 
     pub fn get_pdc_configuration(&self) {

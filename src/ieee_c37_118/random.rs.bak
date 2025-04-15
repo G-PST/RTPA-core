@@ -1,0 +1,344 @@
+use super::common::{PrefixFrame, StatField, Version};
+use super::config::{ConfigurationFrame, PMUConfigurationFrame};
+use super::data_frame::{DataFrame, PMUData};
+use super::utils::calculate_crc;
+
+use rand::{thread_rng, Rng};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const DEFAULT_NUM_PMUS: usize = 10;
+const DEFAULT_VERSION: Version = Version::V2011;
+const DEFAULT_POLAR: bool = true;
+
+// Generate random station name (16 bytes)
+fn random_station_name(index: usize) -> [u8; 16] {
+    let mut name = [0u8; 16];
+    let name_str = format!("STATION{:02}", index);
+    let bytes = name_str.as_bytes();
+    name[..bytes.len().min(16)].copy_from_slice(&bytes[..bytes.len().min(16)]);
+    name
+}
+
+// Generate random channel name (16 bytes)
+fn random_channel_name(prefix: &str, index: usize) -> [u8; 16] {
+    let mut name = [0u8; 16];
+    let name_str = format!("{}_{:02}", prefix, index);
+    let bytes = name_str.as_bytes();
+    name[..bytes.len().min(16)].copy_from_slice(&bytes[..bytes.len().min(16)]);
+    name
+}
+
+fn create_random_pmu_config(
+    station_index: usize,
+    is_polar: bool,
+    use_float: bool,
+) -> PMUConfigurationFrame {
+    let mut rng = thread_rng();
+
+    // Generate format field based on parameters
+    let mut format: u16 = 0;
+    if is_polar {
+        format |= 0x0001; // Bit 0: 1 for polar
+    }
+    if use_float {
+        format |= 0x0002; // Bit 1: 1 for float phasors
+        format |= 0x0004; // Bit 2: 1 for float analogs
+        format |= 0x0008; // Bit 3: 1 for float freq/dfreq
+    }
+
+    // Determine number of each type of measurement
+    let phnmr: u16 = rng.gen_range(1..4); // 1-3 phasors
+    let annmr: u16 = rng.gen_range(0..3); // 0-2 analog values
+    let dgnmr: u16 = rng.gen_range(0..2); // 0-1 digital status words
+
+    // Generate channel names
+    let mut chnam = Vec::new();
+
+    // Phasor names
+    for i in 0..phnmr {
+        let name = random_channel_name("PH", i as usize);
+        chnam.extend_from_slice(&name);
+    }
+
+    // Analog names
+    for i in 0..annmr {
+        let name = random_channel_name("AN", i as usize);
+        chnam.extend_from_slice(&name);
+    }
+
+    // Digital names
+    for i in 0..dgnmr {
+        let name = random_channel_name("DG", i as usize);
+        chnam.extend_from_slice(&name);
+    }
+
+    // Generate conversion factors
+    let phunit: Vec<u32> = (0..phnmr).map(|_| rng.gen()).collect();
+    let anunit: Vec<u32> = (0..annmr).map(|_| rng.gen()).collect();
+    let digunit: Vec<u32> = (0..dgnmr).map(|_| rng.gen()).collect();
+
+    PMUConfigurationFrame {
+        stn: random_station_name(station_index),
+        idcode: (1000 + station_index) as u16,
+        format,
+        phnmr,
+        annmr,
+        dgnmr,
+        chnam,
+        phunit,
+        anunit,
+        digunit,
+        fnom: 0x0001, // 60Hz nominal frequency
+        cfgcnt: rng.gen(),
+        additional_metadata: None,
+    }
+}
+
+pub fn random_configuration_frame(
+    num_pmus: Option<usize>,
+    version: Option<Version>,
+    polar: Option<bool>,
+) -> ConfigurationFrame {
+    let mut rng = thread_rng();
+
+    // Set defaults or use provided values
+    let num_pmus = num_pmus.unwrap_or(DEFAULT_NUM_PMUS);
+    let version = version.unwrap_or(DEFAULT_VERSION);
+    let is_polar = polar.unwrap_or(DEFAULT_POLAR);
+
+    // Calculate how many stations we need (1 station per 5 PMUs)
+    let num_stations = (num_pmus + 4) / 5;
+    let use_float = true; // Always use float for simplicity
+
+    // Define frame type based on version
+    let (sync, cfg_type) = match version {
+        Version::V2005 => (0xA220, 1), // Config1 frame for 2005
+        Version::V2011 => (0xAA20, 1), // Config1 frame for 2011
+        Version::V2024 => (0xAA50, 3), // Config3 frame for 2024
+    };
+
+    // Get current time
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+
+    let soc = now.as_secs() as u32;
+    let fracsec = ((now.subsec_nanos() as f64) / 1_000_000_000.0 * 16777216.0) as u32; // 24-bit fraction
+
+    // Create PMU configurations
+    let mut pmu_configs = Vec::new();
+    for i in 0..num_stations {
+        pmu_configs.push(create_random_pmu_config(i, is_polar, use_float));
+    }
+
+    // Create initial configuration frame with temporary framesize
+    let prefix = PrefixFrame {
+        sync,
+        framesize: 0, // Will be calculated later
+        idcode: rng.gen(),
+        soc,
+        fracsec,
+        version,
+    };
+
+    // Create the configuration frame
+    let mut config_frame = ConfigurationFrame {
+        prefix,
+        time_base: 16777216, // Standard time base for C37.118
+        num_pmu: num_stations as u16,
+        pmu_configs,
+        data_rate: 30, // 30 frames per second
+        chk: 0,        // Will be calculated later
+        cfg_type,
+    };
+
+    // Now set the framesize by having ConfigurationFrame calculate it
+    // (but don't include the checksum yet)
+    let frame_bytes = config_frame.to_hex();
+    config_frame.prefix.framesize = frame_bytes.len() as u16;
+
+    // Generate frame with updated framesize
+    let frame_bytes = config_frame.to_hex();
+
+    // Calculate checksum
+    config_frame.chk = calculate_crc(&frame_bytes[..frame_bytes.len() - 2]);
+
+    config_frame
+}
+
+fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
+    let mut rng = thread_rng();
+
+    // Create random STAT field (normally would be 0 for good data)
+    let raw_stat: u16 = 0; // Using 0 for normal operation
+    let stat = StatField {
+        raw: raw_stat,
+        data_error: 0,        // No data error
+        pmu_sync: true,       // PMU is synchronized
+        data_sorting: false,  // No sorting
+        pmu_trigger: false,   // No trigger
+        config_change: false, // No config change
+        data_modified: false, // Data not modified
+        time_quality: 0,      // Good time quality
+        unlock_time: 0,       // Time is locked (using 0 instead of boolean)
+        trigger_reason: 0,    // No trigger reason
+    };
+
+    // Generate phasor data
+    let mut phasors = Vec::new();
+    let phasor_size = pmu_config.phasor_size() * pmu_config.phnmr as usize;
+    for _ in 0..phasor_size {
+        phasors.push(rng.gen());
+    }
+
+    // Generate frequency and dfreq data
+    let mut freq = Vec::new();
+    let mut dfreq = Vec::new();
+    let freq_size = pmu_config.freq_dfreq_size();
+
+    if pmu_config.format & 0x0008 != 0 {
+        // Float frequency (4 bytes)
+        let freq_val: f32 = 60.0 + rng.gen::<f32>() * 0.2 - 0.1; // Around 60 Hz
+        let dfreq_val: f32 = rng.gen::<f32>() * 0.1 - 0.05; // Small df/dt
+
+        freq.extend_from_slice(&freq_val.to_be_bytes());
+        dfreq.extend_from_slice(&dfreq_val.to_be_bytes());
+    } else {
+        // Fixed frequency (2 bytes) - scaled value
+        let freq_val: i16 = rng.gen_range(-32767..32767); // Random frequency
+        let dfreq_val: i16 = rng.gen_range(-50..50); // Small df/dt
+
+        freq.extend_from_slice(&freq_val.to_be_bytes());
+        dfreq.extend_from_slice(&dfreq_val.to_be_bytes());
+    }
+
+    // Generate analog values
+    let mut analog = Vec::new();
+    let analog_size = pmu_config.analog_size() * pmu_config.annmr as usize;
+    for _ in 0..analog_size {
+        analog.push(rng.gen());
+    }
+
+    // Generate digital values
+    let mut digital = Vec::new();
+    let total_digital_bytes = 2 * pmu_config.dgnmr as usize;
+    for _ in 0..total_digital_bytes {
+        digital.push(rng.gen());
+    }
+
+    PMUData {
+        stat,
+        phasors,
+        freq,
+        dfreq,
+        analog,
+        digital,
+    }
+}
+
+pub fn random_data_frame(config_frame: &ConfigurationFrame) -> DataFrame {
+    // Create prefix frame with current timestamp
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+
+    let soc = now.as_secs() as u32;
+    let fracsec = ((now.subsec_nanos() as f64) / 1_000_000_000.0 * 16777216.0) as u32;
+
+    // Data frame has a different sync word
+    let sync = match config_frame.prefix.version {
+        Version::V2005 => 0xA801, // Data frame for 2005
+        Version::V2011 => 0xAA01, // Data frame for 2011
+        Version::V2024 => 0xAA01, // Data frame for 2024
+    };
+
+    let prefix = PrefixFrame {
+        sync,
+        framesize: 0, // Will be calculated later
+        idcode: config_frame.prefix.idcode,
+        soc,
+        fracsec,
+        version: config_frame.prefix.version,
+    };
+
+    // Generate random PMU data based on configuration
+    let mut pmu_data = Vec::new();
+
+    for pmu_config in &config_frame.pmu_configs {
+        pmu_data.push(random_pmu_data(pmu_config));
+    }
+
+    // Create the data frame
+    let mut data_frame = DataFrame {
+        prefix,
+        pmu_data,
+        chk: 0, // Will be calculated later
+    };
+
+    // Calculate the framesize using to_hex()
+    let frame_bytes = data_frame.to_hex();
+    data_frame.prefix.framesize = frame_bytes.len() as u16;
+
+    // Generate the frame bytes again with the correct framesize
+    let frame_bytes = data_frame.to_hex();
+
+    // Calculate checksum
+    data_frame.chk = calculate_crc(&frame_bytes[..frame_bytes.len() - 2]);
+
+    data_frame
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[ignore]
+    #[test]
+    fn test_random_config_frame() {
+        // Test with default parameters
+        let config_frame = random_configuration_frame(None, None, None);
+
+        // Verify the frame has the expected number of PMUs
+        assert_eq!(config_frame.num_pmu, ((DEFAULT_NUM_PMUS + 4) / 5) as u16);
+
+        // Verify the frame can be converted to bytes
+        let bytes = config_frame.to_hex();
+        assert!(!bytes.is_empty());
+
+        // Verify the actual size matches the expected size
+        assert_eq!(bytes.len(), config_frame.prefix.framesize as usize);
+
+        // Test with custom parameters
+        let custom_config = random_configuration_frame(Some(5), Some(Version::V2011), Some(true));
+
+        // Verify the frame has the expected number of PMUs
+        assert_eq!(custom_config.num_pmu, 1);
+
+        // Verify the frame can be converted to bytes
+        let custom_bytes = custom_config.to_hex();
+        assert!(!custom_bytes.is_empty());
+
+        // Verify the actual size matches the expected size
+        assert_eq!(custom_bytes.len(), custom_config.prefix.framesize as usize);
+    }
+
+    #[ignore]
+    #[test]
+    fn test_random_data_frame() {
+        // Create a random configuration frame
+        let config_frame = random_configuration_frame(Some(5), None, None);
+
+        // Create a random data frame based on the configuration
+        let data_frame = random_data_frame(&config_frame);
+
+        // Verify the data frame has the same number of PMUs as the config frame
+        assert_eq!(data_frame.pmu_data.len(), config_frame.pmu_configs.len());
+
+        // Verify the data frame can be converted to bytes
+        let bytes = data_frame.to_hex();
+        assert!(!bytes.is_empty());
+
+        // Verify the actual size matches the expected size
+        assert_eq!(bytes.len(), data_frame.prefix.framesize as usize);
+    }
+}

@@ -8,3 +8,11 @@
 6. Expose the Accumulator as python modules.
 7. Enhance the mock-pdc to create up to 500 mock PMUs.
 8. Implement a way to read in a historical csv file, create a mock configuration based on columns, and create a mock pdc.
+
+
+--------
+
+Fix StatField test. Might need it in order to drop frames that are bad.
+It looks like Command::new_turn_on_transmission() and other methods will need an idcode parameter. Should also fill in the time fields using the standard library.
+
+Fix random config and data frame generation utilities. (Not passing tests)

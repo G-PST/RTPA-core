@@ -1,10 +1,6 @@
-#![allow(unused)]
-//const BUFFER_MAX_SIZE: u32 = 104857600;
-//const SECONDS_PER_MINUTE: u32 = 60;
-//use rand::rngs::StdRng;
-//use rand::{Rng, SeedableRng};
-//use serde::de::Error;
-use crate::frames::calculate_crc;
+use crate::ieee_c37_118::commands::{CommandFrame, CommandType};
+use crate::ieee_c37_118::utils::calculate_crc;
+
 use std::error::Error;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -16,7 +12,6 @@ pub enum Protocol {
     UDP,
 }
 
-use crate::frame_parser::{parse_frame, Frame};
 use std::fs;
 use std::path::Path;
 
@@ -110,37 +105,43 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
                     Ok(n) if n > 0 => {
 
                         // Parse command frame
-                        if let Ok(frame) = parse_frame(&buf[..n], None) {
-                            match frame {
-                                Frame::Command(cmd) => {
-                                    match cmd.command {
-                                        4 => { // Send config frame
-                                            println!("MOCK PDC: Received command: Send configuration frame");
-                                            match read_test_file("config_message.bin") {
-                                                Ok(config_data) => {
-                                                    socket.write_all(&config_data).await?;
-                                                },
-                                                Err(e) => {
-                                                    println!("MOCK PDC: Error reading config file: {}", e);
-                                                }
-                                            }
+                        if let Ok(cmd) = CommandFrame::from_hex(&buf[..n]) {
+                            println!("MOCK PDC: Received command: {}", cmd.command_description());
+
+                            // Use command_type to get the enum variant
+                            match cmd.command_type() {
+                                Some(CommandType::SendConfigFrame2) | Some(CommandType::SendConfigFrame1) => {
+                                    // Send config frame
+                                    match read_test_file("config_message.bin") {
+                                        Ok(config_data) => {
+                                            socket.write_all(&config_data).await?;
                                         },
-                                        2 => { // Start data transmission
-                                            println!("MOCK PDC: Received command: Start data transmission");
-                                            is_streaming = true;
-                                        },
-                                        1 => { // Stop data transmission
-                                            println!("MOCK PDC: Received command: Stop data transmission");
-                                            is_streaming = false;
-                                        },
-                                        _ => {
-                                            println!("MOCK PDC: Received unknown command: {}", cmd.command);
+                                        Err(e) => {
+                                            println!("MOCK PDC: Error reading config file: {}", e);
                                         }
                                     }
                                 },
-                                _ => println!("MOCK PDC: Received non-command frame"),
+                                Some(CommandType::TurnOnTransmission) => {
+                                    // Start data transmission
+                                    println!("MOCK PDC: Received command: Start data transmission");
+                                    is_streaming = true;
+                                },
+                                Some(CommandType::TurnOffTransmission) => {
+                                    // Stop data transmission
+                                    println!("MOCK PDC: Received command: Stop data transmission");
+                                    is_streaming = false;
+                                },
+                                Some(cmd_type) => {
+                                    println!("MOCK PDC: Received unhandled command type: {}", cmd_type);
+                                },
+                                None => {
+                                    println!("MOCK PDC: Received unknown command: {}", cmd.command);
+                                }
                             }
+                        } else {
+                            println!("MOCK PDC: Received non-command frame");
                         }
+
                     },
                     Ok(0) => {
                         println!("MOCK PDC: Client disconnected");

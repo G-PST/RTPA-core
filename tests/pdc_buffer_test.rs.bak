@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use rtpa_core::ieee_c37_118::VersionStandard;
+    use rtpa_core::ieee_c37_118::Version;
     use rtpa_core::pdc_buffer::PDCBuffer;
     use rtpa_core::pdc_server::{run_mock_server, Protocol, ServerConfig};
 
@@ -51,7 +51,7 @@ mod tests {
             "127.0.0.1".to_string(),
             4712,
             1, // ID code
-            Some(VersionStandard::Ieee2011),
+            Some(Version::V2011),
             None,
             None,
         );

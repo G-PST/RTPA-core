@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use super::ieee_c37_118::frames::ConfigurationFrame;
 use crate::accumulator::manager::AccumulatorConfig;
-use crate::ieee_c37_118::models::{ChannelDataType, ChannelInfo};
+use crate::ieee_c37_118::common::{ChannelDataType, ChannelInfo};
+use crate::ieee_c37_118::config::ConfigurationFrame;
 
 use arrow::datatypes::DataType;
 
-pub fn config_to_accumulators(config: &dyn ConfigurationFrame) -> Vec<AccumulatorConfig> {
+pub fn config_to_accumulators(config: &ConfigurationFrame) -> Vec<AccumulatorConfig> {
     // Takes a IEEE c37.118 configuration frame struct and converts it to a vector of Accumulator structs
     // Loops through vec of ChannelDataType  and returns a vector of Accumulator structs.
     //
