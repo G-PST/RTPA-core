@@ -19,4 +19,4 @@ pub mod utils;
 
 pub mod pdc_buffer;
 
-//pub mod pdc_buffer_py;
+pub mod pdc_buffer_py;

@@ -20,12 +20,13 @@ impl PDCBufferPy {
     }
 
     // TODO: Allow user to specify the desired version standard. PDCBuffer should fall back to default version (2011) if none is specified.
+
+    #[pyo3(signature=(ip_addr, port, id_code,  batch_size = None, max_batches = None))]
     fn connect(
         &mut self,
         ip_addr: String,
         port: u16,
         id_code: u16,
-
         batch_size: Option<usize>,
         max_batches: Option<usize>,
     ) -> PyResult<()> {
@@ -147,7 +148,7 @@ impl PDCBufferPy {
 }
 
 #[pymodule]
-fn rtpa_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rtpa_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PDCBufferPy>()?;
     Ok(())
 }
