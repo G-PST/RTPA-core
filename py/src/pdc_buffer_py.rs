@@ -1,5 +1,4 @@
-#[allow(unused)]
-use super::pdc_buffer::PDCBuffer;
+use ::rtpa_core::pdc_buffer::PDCBuffer;
 use arrow::pyarrow::ToPyArrow;
 use arrow::record_batch::RecordBatch;
 use pyo3::prelude::*;

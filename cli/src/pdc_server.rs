@@ -4,8 +4,8 @@ use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::{self, Duration};
 
-use crate::ieee_c37_118::commands::{CommandFrame, CommandType};
-use crate::ieee_c37_118::utils::calculate_crc;
+use rtpa_core::ieee_c37_118::commands::{CommandFrame, CommandType};
+use rtpa_core::ieee_c37_118::utils::calculate_crc;
 
 use std::fs;
 use std::path::Path;

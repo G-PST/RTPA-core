@@ -1,0 +1,16 @@
+[package]
+name = "rtpa_core"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+name = "rtpa_core"
+path = "src/lib.rs"
+
+[dependencies]
+# Use workspace dependencies
+arrow = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }

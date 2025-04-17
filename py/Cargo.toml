@@ -1,0 +1,18 @@
+[package]
+name = "rtpa_python"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+name = "rtpa_python"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Reference the core library
+rtpa_core = { path = "../core" }
+
+# Python-specific dependencies
+arrow = { workspace = true, features = ["pyarrow"] }
+pyo3 = { version = "0.23.3", features = ["extension-module"] }
+serde = { workspace = true }
+serde_json = { workspace = true }

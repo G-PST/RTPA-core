@@ -38,7 +38,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
-
 // Connection status of the pdc server.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
