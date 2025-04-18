@@ -16,6 +16,7 @@ use crate::accumulator::manager::{AccumulatorConfig, AccumulatorManager};
 use crate::ieee_c37_118::commands::CommandFrame;
 use crate::ieee_c37_118::common::{FrameType, Version};
 use crate::ieee_c37_118::config::ConfigurationFrame;
+use crate::ieee_c37_118::phasors::PhasorType;
 use crate::ieee_c37_118::utils::validate_checksum;
 use crate::utils::config_to_accumulators;
 
@@ -52,6 +53,7 @@ impl PDCBuffer {
         version: Option<Version>,
         batch_size: Option<usize>,
         max_batches: Option<usize>,
+        output_phasor_type: Option<PhasorType>,
     ) -> Self {
         // try to connect to the tcp socket.
         //
@@ -114,10 +116,12 @@ impl PDCBuffer {
         // Determine data frame size expected by the configuration frame
         let data_frame_size = config_frame.calc_data_frame_size();
 
-        let accumulators = config_to_accumulators(&config_frame);
+        let (accumulators, phasor_accumulators) =
+            config_to_accumulators(&config_frame, output_phasor_type);
 
         let accumulator_manager = AccumulatorManager::new_with_params(
             accumulators.clone(),
+            phasor_accumulators.clone(),
             max_batches.unwrap_or(DEFAULT_MAX_BATCHES),
             data_frame_size,
             batch_size.unwrap_or(DEFAULT_BATCH_SIZE),

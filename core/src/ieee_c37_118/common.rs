@@ -58,6 +58,8 @@ impl fmt::Display for Version {
     }
 }
 
+// TODO Implement TimeQualityIndicator struct
+
 /// Represents the type of the frame
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameType {
@@ -130,7 +132,8 @@ pub struct PrefixFrame {
     pub framesize: u16,
     pub idcode: u16,
     pub soc: u32,
-    pub fracsec: u32, // Includes time quality in bits 31-24
+    pub leapbyte: u8, // Includes time quality in bits 31-24
+    pub fracsec: u32,
     #[serde(skip)] // Transient field, not serialized
     pub version: Version, // Derived from sync
 }
@@ -142,6 +145,7 @@ impl PrefixFrame {
             framesize: 14, // Default, updated later
             idcode,
             soc: 0,
+            leapbyte: 0,
             fracsec: 0,
             version,
         }
@@ -159,7 +163,8 @@ impl PrefixFrame {
             framesize: u16::from_be_bytes([bytes[2], bytes[3]]),
             idcode: u16::from_be_bytes([bytes[4], bytes[5]]),
             soc: u32::from_be_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]),
-            fracsec: u32::from_be_bytes([bytes[10], bytes[11], bytes[12], bytes[13]]),
+            leapbyte: bytes[10],
+            fracsec: u32::from_be_bytes([0, bytes[11], bytes[12], bytes[13]]),
             version,
         })
     }
@@ -170,7 +175,12 @@ impl PrefixFrame {
         result[2..4].copy_from_slice(&self.framesize.to_be_bytes());
         result[4..6].copy_from_slice(&self.idcode.to_be_bytes());
         result[6..10].copy_from_slice(&self.soc.to_be_bytes());
-        result[10..14].copy_from_slice(&self.fracsec.to_be_bytes());
+        result[10] = self.leapbyte;
+
+        let fracsec = &self.fracsec.to_be_bytes();
+        result[11] = fracsec[1];
+        result[12] = fracsec[2];
+        result[13] = fracsec[3];
         result
     }
 }

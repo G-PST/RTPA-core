@@ -5,18 +5,16 @@
 // timeseries variable, we want to store them close to each other in memory
 // to take advantage of cache locality and row/column cache hits in DRAM.
 //
-// Assumes the buffer is always less than [u8;55*1024]
-// Perhaps this buffer can be a compile time flag.
-//
-// We will want to assign several accumulators to a single thread
-// that is pinned to a specific core. The goal being to keep the sparse accumulators
-// in l1/l2 cache.
-//
-use arrow::buffer::MutableBuffer;
 
+#![allow(unused)]
+
+use crate::ieee_c37_118::phasors::{PhasorType, PhasorValue};
+use arrow::buffer::MutableBuffer;
 // statically declare error messages
 const ERR_SLICE_LEN_2: &str = "Input slice must be exactly 2 bytes";
 const ERR_SLICE_LEN_4: &str = "Input slice must be exactly 4 bytes";
+//const ERR_SLICE_LEN_8: &str = "Input slice must be exactly 8 bytes";
+
 // Types of available accumulators 2 bytes each to parse up to 65KB buffers.
 
 pub enum Accumulator {
@@ -111,26 +109,99 @@ impl Accumulate for U16Accumulator {
 #[repr(align(2))]
 pub struct C37118TimestampAccumulator {
     pub var_loc: u16,
+    // TODO: Add time_base to struct for scaling fracsec
 }
 impl Accumulate for C37118TimestampAccumulator {
     fn accumulate(&self, input_buffer: &[u8], output_buffer: &mut MutableBuffer) {
         let loc = self.var_loc as usize;
-        let slice_partition = loc + 4;
 
         // IEEE C37.118 timestamp: 8 bytes total
         // - First 4 bytes: seconds since UNIX epoch (u32, big-endian)
-        // - Next 4 bytes: fraction of a second in microseconds (u32, big-endian)
-        let seconds = &input_buffer[loc..slice_partition];
-        let fracsec = &input_buffer[slice_partition..slice_partition + 4];
+        // - Leap Second Indicator (u8) (skip)
+        // - Last 3 bytes: fraction of a second in microseconds (u32, big-endian)
+        let seconds = &input_buffer[loc..loc + 4];
 
         let err_msg = "slice length must be 4";
         let seconds = u32::from_be_bytes(seconds.try_into().expect(err_msg));
-        let microseconds = u32::from_be_bytes(fracsec.try_into().expect(err_msg));
+        // Microseconds is u24 but will pad to u32
+        let microseconds = u32::from_be_bytes([
+            0,
+            input_buffer[loc + 6],
+            input_buffer[loc + 7],
+            input_buffer[loc + 8],
+        ]);
 
         // combine into single i64 timestamp in nanoseconds
         // seconds * 1e9 + microseconds * 1e3
         let timestamp_ns = (seconds as i64 * 1_000_000_000) + (microseconds as i64 * 1_000);
         output_buffer.extend_from_slice(&timestamp_ns.to_le_bytes());
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct C37118PhasorAccumulator {
+    pub var_loc: u16,
+    pub input_type: PhasorType,
+    pub output_type: PhasorType,
+    pub scale_factor: u32,
+}
+
+impl C37118PhasorAccumulator {
+    // New method that takes two buffers - one for each component
+    pub fn accumulate(
+        &self,
+        input_buffer: &[u8],
+        component1_buffer: &mut MutableBuffer,
+        component2_buffer: &mut MutableBuffer,
+    ) {
+        let loc = self.var_loc as usize;
+
+        // Determine input size based on input type
+        let input_size = match self.input_type {
+            PhasorType::FloatPolar | PhasorType::FloatRect => 8, // 2 * f32
+            PhasorType::IntPolar | PhasorType::IntRect => 4,
+        };
+
+        let slice = &input_buffer[loc..loc + input_size];
+
+        // Parse the input data to the correct phasor type
+        let phasor_value =
+            PhasorValue::from_hex(slice, self.input_type).expect("Failed to parse phasor data");
+
+        // Convert to the desired output type
+        match self.output_type {
+            PhasorType::FloatPolar => {
+                let phasor_converted = phasor_value.to_float_polar(Some(self.scale_factor));
+                component1_buffer.extend_from_slice(&phasor_converted.magnitude.to_le_bytes());
+                component2_buffer.extend_from_slice(&phasor_converted.angle.to_le_bytes());
+            }
+            PhasorType::FloatRect => {
+                let converted_phasor = phasor_value.to_float_rect(Some(self.scale_factor));
+                component1_buffer.extend_from_slice(&converted_phasor.real.to_le_bytes());
+                component2_buffer.extend_from_slice(&converted_phasor.imag.to_le_bytes());
+            }
+            _ => {
+                // If no conversion requested, write the native format values
+                match phasor_value {
+                    PhasorValue::FloatPolar(phasor) => {
+                        component1_buffer.extend_from_slice(&phasor.magnitude.to_le_bytes());
+                        component2_buffer.extend_from_slice(&phasor.angle.to_le_bytes());
+                    }
+                    PhasorValue::FloatRect(phasor) => {
+                        component1_buffer.extend_from_slice(&phasor.real.to_le_bytes());
+                        component2_buffer.extend_from_slice(&phasor.imag.to_le_bytes());
+                    }
+                    PhasorValue::IntPolar(phasor) => {
+                        component1_buffer.extend_from_slice(&phasor.magnitude.to_le_bytes());
+                        component2_buffer.extend_from_slice(&phasor.angle.to_le_bytes());
+                    }
+                    PhasorValue::IntRect(phasor) => {
+                        component1_buffer.extend_from_slice(&phasor.real.to_le_bytes());
+                        component2_buffer.extend_from_slice(&phasor.imag.to_le_bytes());
+                    }
+                }
+            }
+        }
     }
 }
 

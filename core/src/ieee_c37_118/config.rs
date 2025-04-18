@@ -1,6 +1,7 @@
 // Unified PMUConfigurationFrame
 #![allow(unused)]
 use super::common::{ChannelDataType, ChannelInfo, ParseError, PrefixFrame, Version};
+use super::units::{AnalogUnits, DataRate, DigitalUnits, NominalFrequency, PhasorUnits};
 use super::utils::validate_checksum;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,10 +15,10 @@ pub struct PMUConfigurationFrame {
     pub annmr: u16,
     pub dgnmr: u16,
     pub chnam: Vec<u8>, // Channel names
-    pub phunit: Vec<u32>,
-    pub anunit: Vec<u32>,
+    pub phunit: Vec<PhasorUnits>,
+    pub anunit: Vec<AnalogUnits>,
     pub digunit: Vec<u32>,
-    pub fnom: u16,
+    pub fnom: NominalFrequency,
     pub cfgcnt: u16,
     // 2024-specific fields (optional)
     pub additional_metadata: Option<Vec<u8>>, // CFG-3 extended metadata
@@ -45,20 +46,21 @@ impl PMUConfigurationFrame {
 
         let mut phunit = vec![];
         for _ in 0..phnmr {
-            phunit.push(u32::from_be_bytes(
-                bytes[offset..offset + 4].try_into().unwrap(),
-            ));
+            phunit.push(
+                PhasorUnits::from_hex(&bytes[offset..offset + 4]).unwrap(), //u32::from_be_bytes(
+                                                                            //bytes[offset..offset + 4].try_into().unwrap(),
+                                                                            //)
+            );
             offset += 4;
         }
 
         let mut anunit = vec![];
         for _ in 0..annmr {
-            anunit.push(u32::from_be_bytes(
-                bytes[offset..offset + 4].try_into().unwrap(),
-            ));
+            anunit.push(AnalogUnits::from_hex(&bytes[offset..offset + 4]).unwrap());
             offset += 4;
         }
 
+        // TODO implement digital unit struct
         let mut digunit = vec![];
         for _ in 0..dgnmr {
             digunit.push(u32::from_be_bytes(
@@ -67,7 +69,8 @@ impl PMUConfigurationFrame {
             offset += 4;
         }
 
-        let fnom = u16::from_be_bytes(bytes[offset..offset + 2].try_into().unwrap());
+        //let fnom = u16::from_be_bytes(bytes[offset..offset + 2].try_into().unwrap());
+        let fnom = NominalFrequency::from_hex(&bytes[offset..offset + 2]).unwrap();
         offset += 2;
         let cfgcnt = u16::from_be_bytes(bytes[offset..offset + 2].try_into().unwrap());
         offset += 2;
@@ -107,16 +110,16 @@ impl PMUConfigurationFrame {
         // Ensure channel names are written with the correct structure
         result.extend_from_slice(&self.chnam);
 
-        for &ph in &self.phunit {
-            result.extend_from_slice(&ph.to_be_bytes());
+        for ph in &self.phunit {
+            result.extend_from_slice(&ph.to_hex());
         }
-        for &an in &self.anunit {
-            result.extend_from_slice(&an.to_be_bytes());
+        for an in &self.anunit {
+            result.extend_from_slice(&an.to_hex());
         }
-        for &dg in &self.digunit {
+        for dg in &self.digunit {
             result.extend_from_slice(&dg.to_be_bytes());
         }
-        result.extend_from_slice(&self.fnom.to_be_bytes());
+        result.extend_from_slice(&self.fnom.to_hex().unwrap());
         result.extend_from_slice(&self.cfgcnt.to_be_bytes());
         if let Some(meta) = &self.additional_metadata {
             if version == Version::V2024 {

@@ -51,8 +51,8 @@ mod unified_tests {
         assert_eq!(prefix.framesize, 454);
         assert_eq!(prefix.idcode, 7734);
         assert_eq!(prefix.soc, 1_149_577_200);
-        // todo this needs to be fixed. It seems like there is a flag within the u32 value.
-        //assert_eq!(prefix.fracsec, 463);
+
+        assert_eq!(prefix.fracsec, 463000);
         // Verify version detection
         assert_eq!(prefix.version, Version::V2005);
     }
@@ -373,7 +373,7 @@ mod unified_tests {
 
         // The fracsec in the file includes the fraction of second time quality
         // but we only care about verifying that we can parse it correctly
-        assert_eq!(cmd_frame.prefix.fracsec, 252428240, "Incorrect FRACSEC");
+        assert_eq!(cmd_frame.prefix.fracsec, 770000, "Incorrect FRACSEC");
 
         // Verify command code
         assert_eq!(cmd_frame.command, 2, "Incorrect command");

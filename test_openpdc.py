@@ -1,12 +1,12 @@
-from rtpa_core import PDCBufferPy
+from rtpa_python import PDCBufferPy
 import pandas as pd
 from time import sleep
 import binascii  # For hex conversion
 
 pdc_buffer = PDCBufferPy()
 
-#pdc_buffer.connect("127.0.0.1", 8123, 235)
-pdc_buffer.connect("127.0.0.1", 8900, 235)
+pdc_buffer.connect("127.0.0.1", 8123, 235)
+#pdc_buffer.connect("127.0.0.1", 8900, 235)
 
 
 pdc_buffer.start_stream()

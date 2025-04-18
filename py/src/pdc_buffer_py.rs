@@ -1,3 +1,4 @@
+use ::rtpa_core::ieee_c37_118::phasors::PhasorType;
 use ::rtpa_core::pdc_buffer::PDCBuffer;
 use arrow::pyarrow::ToPyArrow;
 use arrow::record_batch::RecordBatch;
@@ -36,6 +37,7 @@ impl PDCBufferPy {
             None,
             batch_size,
             max_batches,
+            Some(PhasorType::FloatPolar),
         ));
         Ok(())
     }
@@ -104,6 +106,31 @@ impl PDCBufferPy {
             )),
         }
     }
+    fn get_raw_sample(&self) -> PyResult<Vec<u8>> {
+        match &self.inner {
+            Some(buffer) => buffer
+                .get_latest_buffer()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e)),
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Not connected. Call connect() first",
+            )),
+        }
+    }
+
+    fn get_channel_location(&self, channel_name: &str) -> PyResult<(u16, u8)> {
+        match &self.inner {
+            Some(buffer) => match buffer.get_channel_location(channel_name) {
+                Some(location) => Ok(location),
+                None => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Channel '{}' not found",
+                    channel_name
+                ))),
+            },
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Not connected. Call connect() first",
+            )),
+        }
+    }
 
     // In PDCBufferPy
     #[pyo3(signature = (columns=None, window_secs=None))]
@@ -147,7 +174,7 @@ impl PDCBufferPy {
 }
 
 #[pymodule]
-fn rtpa_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rtpa_python(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PDCBufferPy>()?;
     Ok(())
 }

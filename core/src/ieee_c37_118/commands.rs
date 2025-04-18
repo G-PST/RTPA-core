@@ -158,6 +158,7 @@ impl CommandFrame {
             framesize: framesize as u16,
             idcode,
             soc,
+            leapbyte: 0,
             fracsec,
             version: Version::V2011, // Default to 2011 version
         };

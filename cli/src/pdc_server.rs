@@ -42,7 +42,7 @@ impl ServerConfig {
 }
 
 fn read_test_file(file_name: &str) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
-    let path = Path::new("tests/test_data").join(file_name);
+    let path = Path::new("core/tests/test_data").join(file_name);
     let content = fs::read_to_string(path)?;
 
     // Filter out whitespace and convert to bytes
