@@ -3,8 +3,8 @@
 1. Implement time_base in Timestamp accumulator to correctly calculate fracsec. (Done)
 2. Ability to select a combination of channels, columns or pmus to accumulate.
 3. Use UDP for streaming, TCP for command frames. (We don't want to risk backlogging their network.)
-4. Use FNOM for frequency data. (At least to indicate the unit in the column header.)
-5. Change Voltage to (V) and Current to (A). If scaling to kV, use (kV)
+4. Use FNOM for frequency data. (At least to indicate the unit in the column header.) (Done)
+5. Change Voltage to (V) and Current to (A). If scaling to kV, use (kV) (Done)
 6. Fix DigitalChannels or don't accumulate. (Only Breaker 1 Status shows up, should be 16.)
 
 
@@ -25,7 +25,7 @@
 4. Implement Version 3 of the standard. (Nice to have, Kind of already implemented. id_code = stream_id, fracsec = leap_byte + fracsec)
 5. Expose the IEEE standard as python modules. (Nice to have)
 6. Expose the Accumulator as python modules. (Deferred. Not necessary for this project.)
-7. Enhance the mock-pdc to create up to 500 mock PMUs.
+7. Enhance the mock-pdc to create up to 500 mock PMUs. (Done, create up to 120 PMUs, max frame size of 65kB)
 8. Implement a way to read in a historical csv file, create a mock configuration based on columns, and create a mock pdc. (They should just save a sample and compare it to the historian)
 
 9. Implement Periodic Data Frame format (Low priority)

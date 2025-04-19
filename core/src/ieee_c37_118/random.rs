@@ -13,7 +13,7 @@ const DEFAULT_POLAR: bool = false;
 
 // Generate random station name (16 bytes)
 fn random_station_name(index: usize) -> [u8; 16] {
-    let mut name = [0u8; 16];
+    let mut name = [b' '; 16];
     let name_str = format!("STATION{:02}", index);
     let bytes = name_str.as_bytes();
     name[..bytes.len().min(16)].copy_from_slice(&bytes[..bytes.len().min(16)]);
@@ -22,7 +22,7 @@ fn random_station_name(index: usize) -> [u8; 16] {
 
 // Generate random channel name (16 bytes)
 fn random_channel_name(prefix: &str, index: usize) -> [u8; 16] {
-    let mut name = [0u8; 16];
+    let mut name = [b' '; 16];
     let name_str = format!("{}_{:02}", prefix, index);
     let bytes = name_str.as_bytes();
     name[..bytes.len().min(16)].copy_from_slice(&bytes[..bytes.len().min(16)]);

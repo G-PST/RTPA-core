@@ -1,18 +1,22 @@
+
+
 from rtpa import PDCBuffer
 import pandas as pd
+import polars as pl
+
 from time import sleep, time
 import binascii  # For hex conversion
 
 pdc_buffer = PDCBuffer()
 
-#pdc_buffer.connect("127.0.0.1", 8123, 235)
-pdc_buffer.connect("127.0.0.1", 8900, 235)
+pdc_buffer.connect("127.0.0.1", 8123, 235)
+#pdc_buffer.connect("127.0.0.1", 8900, 235)
 
 
 pdc_buffer.start_stream()
 
 print("Stream started, waiting for buffer to fill")
-sleep(5)
+sleep(120)
 print("requesting data")
 t1 = time()
 record_batch = pdc_buffer.get_data()
@@ -21,11 +25,21 @@ df = record_batch.to_pandas()
 t3 = time()
 df['DATETIME'] = pd.to_datetime(df['DATETIME'])
 t4 = time()
+dfpl = pl.from_arrow(record_batch)
+t5 = time()
 
 print("Data received")
-print(f"Time taken to receive data: {(t2-t1)*1000:.1f} milliseconds")
+print(f"Time taken to produce record batch: {(t2-t1)*1000:.1f} milliseconds")
 print(f"Time taken to convert to pandas DataFrame: {(t3-t2)*1000:.1f} milliseconds")
 print(f"Time taken to convert to datetime: {(t4-t3)*1000:.1f} milliseconds")
+print(f"Time taken to convert to polars: {(t5-t4)*1000:.1f} milliseconds")
+
+size_in_bytes = df.memory_usage(deep=True).sum()
+size_in_mb = size_in_bytes / (1024 * 1024)
+print(f"Size in MB: {size_in_mb:.2f}")
+
+print("Start and end Time")
+print(df['DATETIME'].max(), df['DATETIME'].min())
 
 print(df.head())
 
@@ -33,7 +47,8 @@ print()
 print(df.iloc[1])
 
 print()
-print(pdc_buffer.get_configuration())
+print(f"Num columns: {len(df.columns)}")
+#print(pdc_buffer.get_configuration())
 
 
 
