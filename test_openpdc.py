@@ -5,8 +5,8 @@ import binascii  # For hex conversion
 
 pdc_buffer = PDCBuffer()
 
-pdc_buffer.connect("127.0.0.1", 8123, 235)
-#pdc_buffer.connect("127.0.0.1", 8900, 235)
+#pdc_buffer.connect("127.0.0.1", 8123, 235)
+pdc_buffer.connect("127.0.0.1", 8900, 235)
 
 
 pdc_buffer.start_stream()
@@ -50,7 +50,7 @@ try:
         print(" ".join(hex_bytes[i:i+16]))
 
     # Get location of a specific channel
-    channel_name = "SHELBY_2_Lagoon Creek +SI_magnitude"
+    channel_name = "SHELBY_2_Lagoon Creek +SI_magnitude (A)"
     location_info = pdc_buffer.get_channel_location(channel_name)
     print(f"\nChannel '{channel_name}' location: offset={location_info[0]}, length={location_info[1]} bytes")
 

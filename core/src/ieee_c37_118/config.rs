@@ -21,7 +21,6 @@ pub struct PMUConfigurationFrame {
     pub fnom: NominalFrequency,
     pub cfgcnt: u16,
     // 2024-specific fields (optional)
-    pub additional_metadata: Option<Vec<u8>>, // CFG-3 extended metadata
 }
 
 impl PMUConfigurationFrame {
@@ -42,6 +41,10 @@ impl PMUConfigurationFrame {
 
         let chnam_len = 16 * (phnmr + annmr + 16 * dgnmr) as usize;
         let chnam = bytes[offset..offset + chnam_len].to_vec();
+        println!(
+            "PMU CONFIG: Created Channel Names of total length {}",
+            chnam.len()
+        );
         offset += chnam_len;
 
         let mut phunit = vec![];
@@ -93,7 +96,6 @@ impl PMUConfigurationFrame {
             digunit,
             fnom,
             cfgcnt,
-            additional_metadata,
         })
     }
 
@@ -121,11 +123,7 @@ impl PMUConfigurationFrame {
         }
         result.extend_from_slice(&self.fnom.to_hex().unwrap());
         result.extend_from_slice(&self.cfgcnt.to_be_bytes());
-        if let Some(meta) = &self.additional_metadata {
-            if version == Version::V2024 {
-                result.extend_from_slice(meta);
-            }
-        }
+
         result
     }
 
@@ -298,6 +296,7 @@ impl ConfigurationFrame {
         for pmu in &self.pmu_configs {
             // Basic size: 16 (STN) + 2 (ID) + 2 (Format) + 6 (channel counts) +
             // chnam + units + 2 (FNOM) + 2 (CFGCNT)
+            //let chnam_len = 16 * (pmu.phnmr + pmu.annmr + 16 * pmu.dgnmr) as usize;
             let chnam_len = 16 * (pmu.phnmr + pmu.annmr + 16 * pmu.dgnmr) as usize;
             let unit_len = 4 * (pmu.phnmr + pmu.annmr + pmu.dgnmr) as usize;
             frame_size += 16 + 2 + 2 + 6 + chnam_len + unit_len + 2 + 2;

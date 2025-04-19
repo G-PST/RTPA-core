@@ -37,8 +37,8 @@ impl Version {
     pub fn from_sync(sync: u16) -> Result<Self, ParseError> {
         match sync & 0x000F {
             0x0001 => Ok(Version::V2005),
-            0x0010 => Ok(Version::V2011),
-            0x0011 => Ok(Version::V2024),
+            0x0002 => Ok(Version::V2011),
+            0x003 => Ok(Version::V2024),
             _ => Err(ParseError::VersionNotSupported),
         }
     }
@@ -56,6 +56,43 @@ impl fmt::Display for Version {
             Version::V2024 => write!(f, "IEEE Std C37.118.2-2024"),
         }
     }
+}
+
+pub fn create_sync(version: Version, frame_type: FrameType) -> u16 {
+    // Frame sync word
+    // Leading byte is leading bytes 0xAA
+    let leading_byte = 0xAA;
+
+    //Second bytes is frame type and version, divided as follows.
+    //Bit 7: reserved.
+    // Bit 6-4: 000: Data Frame
+    //          001: Header Frame
+    //          010: Configuration Frame 1
+    //          011: Configuration Frame 2
+    //          101: Configuration Frame 3
+    //          100: Command Frame
+    // Bit 3-0: Version number in binary (1-15)
+    // Version 1 -> 0001 Version::2005
+    // Version 2 -> 0010 Version::2011
+    // Version 3 -> 0011 Version::2024
+
+    let frame_type_bits = match frame_type {
+        FrameType::Data => 0,
+        FrameType::Header => 1,
+        FrameType::Config1 => 2,
+        FrameType::Config2 => 3,
+        FrameType::Config3 => 5,
+        FrameType::Command => 4,
+    };
+
+    let version_bits = match version {
+        Version::V2005 => 0x01, // 0001 binary
+        Version::V2011 => 0x02, // 0010 binary - actually means 2011
+        Version::V2024 => 0x03, // 0011 binary - actually means 2024
+    };
+
+    // Combine all parts
+    ((leading_byte as u16) << 8) | ((frame_type_bits as u16) << 4) | version_bits
 }
 
 // TODO Implement TimeQualityIndicator struct
@@ -269,5 +306,86 @@ impl StatField {
             }
         }
         raw
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_sync() {
+        // Test for V2005 Config1
+        let version = Version::V2005;
+        let frame_type = FrameType::Config1;
+        let sync = create_sync(version, frame_type);
+        let sync_bytes = sync.to_be_bytes();
+        let expected_bytes: [u8; 2] = [0xAA, 0x21];
+        assert_eq!(sync_bytes, expected_bytes, "Failed for V2005 Config1");
+
+        // Test all versions and frame types
+        let versions = [Version::V2005, Version::V2011, Version::V2024];
+        let frame_types = [
+            FrameType::Data,
+            FrameType::Header,
+            FrameType::Config1,
+            FrameType::Config2,
+            FrameType::Config3,
+            FrameType::Command,
+        ];
+
+        for &version in &versions {
+            for &frame_type in &frame_types {
+                let sync = create_sync(version, frame_type);
+
+                // Validate first byte is 0xAA
+                assert_eq!(
+                    sync >> 8,
+                    0xAA,
+                    "First byte not 0xAA for {:?} {:?}",
+                    version,
+                    frame_type
+                );
+
+                // Validate frame type bits
+                let frame_type_value = match frame_type {
+                    FrameType::Data => 0,
+                    FrameType::Header => 1,
+                    FrameType::Config1 => 2,
+                    FrameType::Config2 => 3,
+                    FrameType::Config3 => 5,
+                    FrameType::Command => 4,
+                };
+                assert_eq!(
+                    (sync >> 4) & 0x7,
+                    frame_type_value,
+                    "Frame type bits incorrect for {:?} {:?}",
+                    version,
+                    frame_type
+                );
+
+                // Validate version bits
+                let version_value = match version {
+                    Version::V2005 => 0x01,
+                    Version::V2011 => 0x02,
+                    Version::V2024 => 0x03,
+                };
+                assert_eq!(
+                    sync & 0x0F,
+                    version_value,
+                    "Version bits incorrect for {:?} {:?}",
+                    version,
+                    frame_type
+                );
+
+                // Also test round-trip conversion
+                let extracted_frame_type = FrameType::from_sync(sync).unwrap();
+                assert_eq!(
+                    extracted_frame_type, frame_type,
+                    "Round-trip frame type mismatch for {:?} {:?}",
+                    version, frame_type
+                );
+            }
+        }
     }
 }

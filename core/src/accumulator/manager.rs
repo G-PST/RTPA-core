@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const MAX_BUFFER_SIZE: usize = 55 * 1024;
+const MAX_BUFFER_SIZE: usize = 65 * 1024;
 const BATCH_SIZE: usize = 120;
 
 #[derive(Debug, Clone)]

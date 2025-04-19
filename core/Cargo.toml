@@ -14,9 +14,19 @@ chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rayon = { workspace = true }
+rand = { workspace = true }
+
 
 [dev-dependencies]
 rtpa_cli = { path = "../cli" }
 criterion = { workspace = true }
 tokio = { workspace = true }
-rand = { workspace = true }
+
+
+[[bench]]
+name = "arrow_latency"
+harness = false
+
+[[bench]]
+name = "accumulator_throughput"
+harness = false
