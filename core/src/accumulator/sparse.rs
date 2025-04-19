@@ -109,6 +109,7 @@ impl Accumulate for U16Accumulator {
 #[repr(align(2))]
 pub struct C37118TimestampAccumulator {
     pub var_loc: u16,
+    pub time_base_ns: u32,
     // TODO: Add time_base to struct for scaling fracsec
 }
 impl Accumulate for C37118TimestampAccumulator {
@@ -126,14 +127,15 @@ impl Accumulate for C37118TimestampAccumulator {
         // Microseconds is u24 but will pad to u32
         let microseconds = u32::from_be_bytes([
             0,
+            input_buffer[loc + 5],
             input_buffer[loc + 6],
             input_buffer[loc + 7],
-            input_buffer[loc + 8],
         ]);
 
         // combine into single i64 timestamp in nanoseconds
         // seconds * 1e9 + microseconds * 1e3
-        let timestamp_ns = (seconds as i64 * 1_000_000_000) + (microseconds as i64 * 1_000);
+        let timestamp_ns =
+            (seconds as i64 * 1_000_000_000) + (microseconds as i64 * self.time_base_ns as i64);
         output_buffer.extend_from_slice(&timestamp_ns.to_le_bytes());
     }
 }
@@ -237,5 +239,32 @@ mod tests {
         assert_eq!(f32_val, 10.0, "f32 value should be 10.0");
         assert_eq!(i32_val, 10, "i32 value should be 10");
         assert_eq!(u16_val, 20, "u16 value should be 20");
+    }
+
+    #[test]
+    fn test_timestamp_acc() {
+        // IEEE C37.118-2011 Timestamp example
+        //
+        let time_base: u32 = u32::from_be_bytes([0x00, 0x0F, 0x42, 0x40]); // in 1_000_000 microseconds
+        let time_base_ns = 1_000_000_000 / time_base; //
+        assert_eq!(time_base_ns, 1_000, "time base should be 1000");
+
+        // Data Frame Example Values
+        // 9:00 AM on 6/6/2006 = 1_149_580_800
+
+        let soc_fracsec_buff: [u8; 8] = [0x44, 0x85, 0x36, 0x00, 0x00, 0x00, 0x41, 0xB1];
+
+        let mut output = MutableBuffer::new(16); // Space for a few values
+        let timestamp_acc = C37118TimestampAccumulator {
+            var_loc: 0,
+            time_base_ns,
+        };
+        timestamp_acc.accumulate(&soc_fracsec_buff, &mut output);
+        let bytes = output.as_slice();
+        let timestamp_val = i64::from_le_bytes(bytes[0..8].try_into().unwrap());
+        assert_eq!(
+            timestamp_val, 1_149_580_800_016_817_000,
+            "timestamp value should be 1_149_580_800_016_817_000"
+        );
     }
 }

@@ -20,7 +20,8 @@ const BATCH_SIZE: usize = 120;
 pub struct AccumulatorConfig {
     pub var_loc: u16,
     pub var_len: u8,
-    pub var_type: DataType,
+    pub scale_factor: u32,
+    pub var_type: DataType, // Data type determins the size of the buffer slice
     pub name: String,
 }
 
@@ -255,6 +256,7 @@ impl AccumulatorManager {
                 DataType::Int64 => {
                     let acc = C37118TimestampAccumulator {
                         var_loc: config.var_loc,
+                        time_base_ns: (config.scale_factor as i64 / 1_000_000_000) as u32,
                     };
                     acc.accumulate(data, &mut buffer_guard);
                 }
@@ -554,12 +556,14 @@ mod tests {
                 var_loc: 0,
                 var_len: 4,
                 var_type: DataType::Float32,
+                scale_factor: 1,
                 name: "float_col".to_string(),
             },
             AccumulatorConfig {
                 var_loc: 4,
                 var_len: 2,
                 var_type: DataType::UInt16,
+                scale_factor: 1,
                 name: "uint16_col".to_string(),
             },
         ];
@@ -618,6 +622,7 @@ mod tests {
             var_loc: 0,
             var_len: 4,
             var_type: DataType::Float32,
+            scale_factor: 1,
             name: "float_col".to_string(),
         }];
 
@@ -638,6 +643,7 @@ mod tests {
             var_loc: 0,
             var_len: 4,
             var_type: DataType::Float32,
+            scale_factor: 1,
             name: "float_col".to_string(),
         }];
 
@@ -665,6 +671,7 @@ mod tests {
             var_loc: 0,
             var_len: 4,
             var_type: DataType::Float32,
+            scale_factor: 1,
             name: "float_col".to_string(),
         }];
         let mut manager = AccumulatorManager::new_with_params(configs, vec![], 10, 4, 5);
@@ -683,6 +690,7 @@ mod tests {
             var_loc: 0,
             var_len: 4,
             var_type: DataType::Float32,
+            scale_factor: 1,
             name: "float_col".to_string(),
         }];
 
@@ -726,6 +734,7 @@ mod tests {
             var_loc: 0,
             var_len: 4,
             var_type: DataType::Float32,
+            scale_factor: 1,
             name: "frequency".to_string(),
         }];
 
@@ -992,12 +1001,14 @@ mod tests {
                 var_loc: 0,
                 var_len: 4,
                 var_type: DataType::Float32,
+                scale_factor: 1,
                 name: "frequency".to_string(),
             },
             AccumulatorConfig {
                 var_loc: 4,
                 var_len: 2,
                 var_type: DataType::Int16,
+                scale_factor: 1,
                 name: "status".to_string(),
             },
         ];
@@ -1069,6 +1080,7 @@ mod tests {
             var_loc: 0,
             var_len: 4,
             var_type: DataType::Float32,
+            scale_factor: 1,
             name: "value".to_string(),
         }];
 

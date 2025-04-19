@@ -33,6 +33,7 @@ pub fn create_configs(num_columns: usize, buffer_size: usize) -> Vec<Accumulator
         configs.push(AccumulatorConfig {
             var_loc,
             var_len,
+            scale_factor: 1,
             var_type,
             name: format!("column_{}", i),
         });

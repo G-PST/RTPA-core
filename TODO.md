@@ -1,15 +1,35 @@
+# Must Complete
+
+1. Implement time_base in Timestamp accumulator to correctly calculate fracsec. (Done)
+2. Ability to select a combination of channels, columns or pmus to accumulate.
+3. Use UDP for streaming, TCP for command frames. (We don't want to risk backlogging their network.)
+4. Use FNOM for frequency data. (At least to indicate the unit in the column header.)
+5. Change Voltage to (V) and Current to (A). If scaling to kV, use (kV)
+6. Fix DigitalChannels or don't accumulate. (Only Breaker 1 Status shows up, should be 16.)
+
+
+# Nice to have
+1. Convert from V to kV for phasor data.
+2. Convert between Radians and Degrees.
+3. Use a DateTime mutable buffer instead of a i64 (nice to have)
+4. Fix STAT field. Optionally drop values that don't meet a certain time measurement quality.
+5. Comments for intellisense and documentation.
+6. Expose the IEEE standard module as python modules. (Nice to have)
+
+# Old
+
 1. Implement the ability to select a combination of channels, pmus or stations to accumulate.
 2. Read through the various TODO comments in the code
-  a. Setting the max data frame size based on the configuration. (Use configuration frame method.)
-  b. ...
+
 3. Implement Header Frame and Config3 frame for v2 (Nice to have)
-4. Implement Version 3 of the standard. (Nice to have)
+4. Implement Version 3 of the standard. (Nice to have, Kind of already implemented. id_code = stream_id, fracsec = leap_byte + fracsec)
 5. Expose the IEEE standard as python modules. (Nice to have)
-6. Expose the Accumulator as python modules. (Nice to have)
+6. Expose the Accumulator as python modules. (Deferred. Not necessary for this project.)
 7. Enhance the mock-pdc to create up to 500 mock PMUs.
-8. Implement a way to read in a historical csv file, create a mock configuration based on columns, and create a mock pdc.
+8. Implement a way to read in a historical csv file, create a mock configuration based on columns, and create a mock pdc. (They should just save a sample and compare it to the historian)
 
 9. Implement Periodic Data Frame format (Low priority)
+
 --------
 
 Fix StatField test. Might need it in order to drop frames that are bad.

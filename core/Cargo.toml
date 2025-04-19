@@ -17,5 +17,6 @@ rayon = { workspace = true }
 
 [dev-dependencies]
 rtpa_cli = { path = "../cli" }
-
+criterion = { workspace = true }
 tokio = { workspace = true }
+rand = { workspace = true }

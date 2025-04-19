@@ -1,5 +1,5 @@
 use ::rtpa_core::ieee_c37_118::phasors::PhasorType;
-use ::rtpa_core::pdc_buffer::PDCBuffer;
+use ::rtpa_core::pdc_buffer::PDCBuffer as PDCBufferRust;
 use arrow::pyarrow::ToPyArrow;
 use arrow::record_batch::RecordBatch;
 use pyo3::prelude::*;
@@ -7,16 +7,16 @@ use pyo3::prelude::*;
 extern crate serde_json;
 
 #[pyclass]
-pub struct PDCBufferPy {
-    inner: Option<PDCBuffer>,
+pub struct PDCBuffer {
+    inner: Option<PDCBufferRust>,
 }
 
 #[pymethods]
-impl PDCBufferPy {
+impl PDCBuffer {
     #[new]
     fn new() -> Self {
         // Don't create the PDCBuffer right away to avoid thread-safety issues
-        PDCBufferPy { inner: None }
+        PDCBuffer { inner: None }
     }
 
     // TODO: Allow user to specify the desired version standard. PDCBuffer should fall back to default version (2011) if none is specified.
@@ -30,7 +30,7 @@ impl PDCBufferPy {
         batch_size: Option<usize>,
         max_batches: Option<usize>,
     ) -> PyResult<()> {
-        self.inner = Some(PDCBuffer::new(
+        self.inner = Some(PDCBufferRust::new(
             ip_addr,
             port,
             id_code,
@@ -174,7 +174,7 @@ impl PDCBufferPy {
 }
 
 #[pymodule]
-fn rtpa_python(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PDCBufferPy>()?;
+fn rtpa(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PDCBuffer>()?;
     Ok(())
 }

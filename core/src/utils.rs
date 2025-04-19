@@ -18,6 +18,7 @@ pub fn config_to_accumulators(
         var_loc: 6,
         var_len: 8,
         var_type: DataType::Int64,
+        scale_factor: config.time_base,
         name: "DATETIME".to_string(),
     }];
 
@@ -65,8 +66,7 @@ pub fn config_to_accumulators(
                 };
 
                 // Determine proper name with type
-                let unit_type = if is_current { "Current" } else { "Voltage" };
-                let formatted_name = format!("{} ({})", name, unit_type);
+                let unit_type = if is_current { "A" } else { "V" };
 
                 // Use the specified output type or default to input type
                 let output_type = output_phasor_type.unwrap_or(input_phasor_type);
@@ -79,13 +79,13 @@ pub fn config_to_accumulators(
                     // For polar representation
                     //
                     PhasorType::FloatPolar | PhasorType::IntPolar => (
-                        format!("{}_magnitude", formatted_name),
-                        format!("{}_angle", formatted_name),
+                        format!("{}_magnitude ({})", name, unit_type),
+                        format!("{}_angle (radians)", name),
                     ),
                     // For rectangular representation
                     PhasorType::FloatRect | PhasorType::IntRect => (
-                        format!("{}_real", formatted_name),
-                        format!("{}_imag", formatted_name),
+                        format!("{}_real ({})", name, unit_type),
+                        format!("{}_imag ({})", name, unit_type),
                     ),
                 };
 
@@ -111,11 +111,16 @@ pub fn config_to_accumulators(
             DataType::Int16
         };
 
+        // TODO check if these units are hard-coded or need to be configurable
         accumulators.push(AccumulatorConfig {
             var_loc: current_offset as u16,
             var_len: freq_size as u8,
             var_type: freq_type.clone(),
-            name: format!("{}_{}_FREQ (Frequency)", station_name, pmu_config.idcode),
+            scale_factor: 1,
+            name: format!(
+                "{}_{}_FREQ_DEVIATION (mHz)",
+                station_name, pmu_config.idcode
+            ),
         });
         current_offset += freq_size;
 
@@ -124,6 +129,7 @@ pub fn config_to_accumulators(
             var_loc: current_offset as u16,
             var_len: freq_size as u8,
             var_type: freq_type,
+            scale_factor: 1,
             name: format!("{}_{}_DFREQ (ROCOF)", station_name, pmu_config.idcode),
         });
         current_offset += freq_size;
@@ -160,6 +166,7 @@ pub fn config_to_accumulators(
                     var_loc: current_offset as u16,
                     var_len: analog_size as u8,
                     var_type: analog_type.clone(),
+                    scale_factor: 1,
                     name: format!("{} ({})", name, measurement_type),
                 });
                 current_offset += analog_size;
@@ -179,6 +186,7 @@ pub fn config_to_accumulators(
                     var_loc: current_offset as u16,
                     var_len: 2, // Digital values are always 2 bytes
                     var_type: DataType::UInt16,
+                    scale_factor: 1,
                     name: format!("{} (Digital)", name),
                 });
                 current_offset += 2;

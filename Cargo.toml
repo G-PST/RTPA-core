@@ -21,3 +21,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 rayon = "1.10.0"
 pyo3 = { version = "0.23.3", features = ["extension-module"] }
+criterion = { version = "0.5.1", features = ["html_reports"] }
+rand = "0.9.0"

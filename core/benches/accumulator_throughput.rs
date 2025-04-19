@@ -37,8 +37,13 @@ fn bench_processing_throughput(c: &mut Criterion) {
                 &(buffer_size, num_accumulators),
                 |b, &(buffer_size, num_acc)| {
                     let configs = create_configs(num_acc, buffer_size);
-                    let mut manager =
-                        AccumulatorManager::new_with_params(configs, 1000, buffer_size, 120);
+                    let mut manager = AccumulatorManager::new_with_params(
+                        configs,
+                        vec![],
+                        1000,
+                        buffer_size,
+                        120,
+                    );
 
                     // Measure how many buffers we can process per second
                     b.iter(|| {
@@ -70,7 +75,7 @@ fn bench_buffer_size_impact(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("buffer_size", size), &size, |b, _| {
             let configs = create_configs(num_accumulators, size);
-            let mut manager = AccumulatorManager::new_with_params(configs, 1000, size, 120);
+            let mut manager = AccumulatorManager::new_with_params(configs, vec![], 1000, size, 120);
 
             b.iter(|| {
                 manager.process_buffer(&test_buffer).unwrap();
@@ -97,7 +102,8 @@ fn bench_sustained_throughput(c: &mut Criterion) {
 
     group.bench_function("sustained_30sec", |b| {
         let configs = create_configs(num_accumulators, buffer_size);
-        let mut manager = AccumulatorManager::new_with_params(configs, 10000, buffer_size, 120); // Large batch capacity
+        let mut manager =
+            AccumulatorManager::new_with_params(configs, vec![], 10000, buffer_size, 120); // Large batch capacity
 
         b.iter_custom(|_| {
             let duration = Duration::from_secs(30); // 30 seconds
@@ -151,7 +157,7 @@ fn bench_ultimate_throughput(c: &mut Criterion) {
 
     group.bench_function("ultimate_240hz", |b| {
         let mut manager =
-            AccumulatorManager::new_with_params(configs.clone(), 5000, buffer_size, 120);
+            AccumulatorManager::new_with_params(configs.clone(), vec![], 5000, buffer_size, 120);
 
         // Warm up
         for _ in 0..100 {

@@ -39,7 +39,7 @@ fn bench_get_dataframe(c: &mut Criterion) {
             &(rows, cols_to_fetch, total_cols),
             |b, &(rows, cols_to_fetch, total_cols)| {
                 let configs = create_configs(total_cols, buffer_size);
-                let mut manager = AccumulatorManager::new(configs, 1000); // Allow more batches
+                let mut manager = AccumulatorManager::new(configs, vec![], 1000); // Allow more batches
 
                 // Process the specified number of rows before starting the benchmark
                 for _ in 0..rows {
@@ -83,7 +83,7 @@ fn bench_time_window(c: &mut Criterion) {
             BenchmarkId::new("window_seconds", window_size),
             &window_size,
             |b, &window| {
-                let mut manager = AccumulatorManager::new(configs.clone(), 1000);
+                let mut manager = AccumulatorManager::new(configs.clone(), vec![], 1000);
 
                 // Process the specified number of rows before benchmarking
                 for _ in 0..rows_to_process {
@@ -124,7 +124,7 @@ fn bench_column_count(c: &mut Criterion) {
             &col_count,
             |b, &cols| {
                 let configs = create_configs(cols, buffer_size);
-                let mut manager = AccumulatorManager::new(configs.clone(), 1000);
+                let mut manager = AccumulatorManager::new(configs.clone(), vec![], 1000);
 
                 // Process data before benchmarking
                 for _ in 0..rows_to_process {
@@ -168,7 +168,7 @@ fn bench_ultimate_test(c: &mut Criterion) {
 
     group.bench_function("max_load", |b| {
         let mut manager =
-            AccumulatorManager::new_with_params(configs.clone(), 1000, buffer_size, 120);
+            AccumulatorManager::new_with_params(configs.clone(), vec![], 1000, buffer_size, 120);
 
         // Process 120 seconds of data at 60Hz = 7200 buffers before benchmarking
         for _ in 0..7200 {
