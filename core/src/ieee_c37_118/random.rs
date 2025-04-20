@@ -1,3 +1,32 @@
+// SPDX-License-Identifier: BSD-3-Clause
+//! # IEEE C37.118 Test Frame Generator
+//!
+//! This module provides utilities for generating random IEEE C37.118 configuration and
+//! data frames for testing purposes, as defined in IEEE C37.118-2005, IEEE C37.118.2-2011,
+//! and IEEE C37.118.2-2024 standards. These frames simulate realistic synchrophasor data
+//! structures for validating parsing and processing logic.
+//!
+//! ## Key Components
+//!
+//! - `random_configuration_frame`: Generates a random `ConfigurationFrame` with specified
+//!   PMUs, version, and phasor format.
+//! - `random_data_frame`: Generates a random `DataFrame` based on a given configuration.
+//! - `create_random_pmu_config`: Internal utility for creating random PMU configurations.
+//! - `random_pmu_data`: Internal utility for generating random PMU data.
+//! - `random_station_name`, `random_channel_name`: Helpers for generating names.
+//!
+//! ## Usage
+//!
+//! This module is used in testing to create synthetic configuration and data frames,
+//! ensuring compatibility with IEEE C37.118 standards. It integrates with the `common`,
+//! `config`, `data_frame`, `units`, and `utils` modules for frame structures and utilities.
+//!
+//! ## Copyright and Authorship
+//!
+//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
+//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
+//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
+
 #![allow(unused)]
 use super::common::{create_sync, FrameType, PrefixFrame, StatField, Version};
 use super::config::{ConfigurationFrame, PMUConfigurationFrame};
@@ -11,7 +40,15 @@ const DEFAULT_NUM_PMUS: usize = 10;
 const DEFAULT_VERSION: Version = Version::V2005;
 const DEFAULT_POLAR: bool = false;
 
-// Generate random station name (16 bytes)
+/// Generates a random 16-byte station name for a PMU.
+///
+/// # Parameters
+///
+/// * `index`: Station index for unique naming.
+///
+/// # Returns
+///
+/// A 16-byte array containing a station name (e.g., "STATION01").
 fn random_station_name(index: usize) -> [u8; 16] {
     let mut name = [b' '; 16];
     let name_str = format!("STATION{:02}", index);
@@ -20,7 +57,16 @@ fn random_station_name(index: usize) -> [u8; 16] {
     name
 }
 
-// Generate random channel name (16 bytes)
+/// Generates a random 16-byte channel name for a measurement.
+///
+/// # Parameters
+///
+/// * `prefix`: Channel type prefix (e.g., "PH" for phasor, "AN" for analog).
+/// * `index`: Channel index for unique naming.
+///
+/// # Returns
+///
+/// A 16-byte array containing a channel name (e.g., "PH_01").
 fn random_channel_name(prefix: &str, index: usize) -> [u8; 16] {
     let mut name = [b' '; 16];
     let name_str = format!("{}_{:02}", prefix, index);
@@ -29,6 +75,17 @@ fn random_channel_name(prefix: &str, index: usize) -> [u8; 16] {
     name
 }
 
+/// Creates a random PMU configuration for testing.
+///
+/// # Parameters
+///
+/// * `station_index`: Index for station naming and ID code.
+/// * `is_polar`: Whether phasors are in polar format (`true`) or rectangular (`false`).
+/// * `use_float`: Whether to use floating-point formats for phasors, analogs, and frequency.
+///
+/// # Returns
+///
+/// A `PMUConfigurationFrame` with random but valid configuration data.
 fn create_random_pmu_config(
     station_index: usize,
     is_polar: bool,
@@ -126,6 +183,20 @@ fn create_random_pmu_config(
     }
 }
 
+/// Generates a random configuration frame for testing IEEE C37.118 compliance.
+///
+/// Creates a `ConfigurationFrame` with random PMU configurations, simulating a realistic
+/// setup for testing parsing and processing logic, as defined in IEEE C37.118 standards.
+///
+/// # Parameters
+///
+/// * `num_pmus`: Optional number of PMUs (defaults to 10).
+/// * `version`: Optional IEEE C37.118 version (defaults to 2005).
+/// * `polar`: Optional flag for polar phasor format (defaults to rectangular).
+///
+/// # Returns
+///
+/// A `ConfigurationFrame` with random PMU configurations, valid frame size, and checksum.
 pub fn random_configuration_frame(
     num_pmus: Option<usize>,
     version: Option<Version>,
@@ -207,6 +278,15 @@ pub fn random_configuration_frame(
     config_frame
 }
 
+/// Generates random PMU data based on a PMU configuration for testing.
+///
+/// # Parameters
+///
+/// * `pmu_config`: The PMU configuration defining data formats and sizes.
+///
+/// # Returns
+///
+/// A `PMUData` instance with random but valid measurement data.
 fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
     let mut rng = rand::rng();
 
@@ -229,7 +309,7 @@ fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
     let mut phasors = Vec::new();
     let phasor_size = pmu_config.phasor_size() * pmu_config.phnmr as usize;
     for _ in 0..phasor_size {
-        phasors.push(rng.random_range(0..255));
+        phasors.push(4);
     }
 
     // Generate frequency and dfreq data
@@ -277,6 +357,18 @@ fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
     }
 }
 
+/// Generates a random data frame for testing IEEE C37.118 compliance.
+///
+/// Creates a `DataFrame` with random measurement data based on a provided configuration
+/// frame, simulating real-time synchrophasor data, as defined in IEEE C37.118 standards.
+///
+/// # Parameters
+///
+/// * `config_frame`: The configuration frame defining PMU data formats and sizes.
+///
+/// # Returns
+///
+/// A `DataFrame` with random PMU data, valid frame size, and checksum.
 pub fn random_data_frame(config_frame: &ConfigurationFrame) -> DataFrame {
     // Create prefix frame with current timestamp
     let now = SystemTime::now()

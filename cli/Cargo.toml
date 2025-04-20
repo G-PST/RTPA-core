@@ -1,7 +1,10 @@
 [package]
 name = "rtpa_cli"
 version = "0.0.1"
-edition = "2021"
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Mock PDC server for IEEE C37.118 frame generation and testing."
 
 [[bin]]
 name = "rtpa"

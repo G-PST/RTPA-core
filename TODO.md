@@ -1,10 +1,6 @@
 # Must Complete
-
-1. Implement time_base in Timestamp accumulator to correctly calculate fracsec. (Done)
 2. Ability to select a combination of channels, columns or pmus to accumulate.
 3. Use UDP for streaming, TCP for command frames. (We don't want to risk backlogging their network.)
-4. Use FNOM for frequency data. (At least to indicate the unit in the column header.) (Done)
-5. Change Voltage to (V) and Current to (A). If scaling to kV, use (kV) (Done)
 6. Fix DigitalChannels or don't accumulate. (Only Breaker 1 Status shows up, should be 16.)
 
 
@@ -16,7 +12,14 @@
 5. Comments for intellisense and documentation.
 6. Expose the IEEE standard module as python modules. (Nice to have)
 
+# Complete
+4. Use FNOM for frequency data. (At least to indicate the unit in the column header.) (Done)
+5. Change Voltage to (V) and Current to (A). If scaling to kV, use (kV) (Done)
+1. Implement time_base in Timestamp accumulator to correctly calculate fracsec. (Done)
+
 # Old
+
+
 
 1. Implement the ability to select a combination of channels, pmus or stations to accumulate.
 2. Read through the various TODO comments in the code

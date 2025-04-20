@@ -1,7 +1,10 @@
 [package]
 name = "rtpa_core"
 version = "0.0.1"
-edition = "2021"
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Core utilities for IEEE C37.118 frame parsing and conversion to Arrow, developed by Micah Webb at NREL"
 
 [lib]
 name = "rtpa_core"

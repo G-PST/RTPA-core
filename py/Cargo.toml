@@ -1,7 +1,10 @@
 [package]
 name = "rtpa"
 version = "0.0.1"
-edition = "2021"
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "The Python of the RTPA-Core PDC Buffer, an in-memory arrow buffer for real-time data analytics of the IEEE C37.118 Phasor Data Concentrator (PDC), developed by Micah Webb at NREL"
 
 [lib]
 name = "rtpa"

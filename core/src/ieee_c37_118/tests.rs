@@ -243,10 +243,7 @@ mod unified_tests {
         }
 
         // Also verify checksum is correct in generated buffer
-        assert!(
-            validate_checksum(&bytes),
-            "Generated frame has invalid checksum"
-        );
+        let () = validate_checksum(&bytes).unwrap();
     }
 
     #[test]
@@ -348,10 +345,8 @@ mod unified_tests {
         }
 
         // Verify checksum is correct
-        assert!(
-            validate_checksum(&output_bytes),
-            "Generated frame has invalid checksum"
-        );
+
+        validate_checksum(&output_bytes).unwrap();
     }
 
     #[test]
@@ -390,7 +385,7 @@ mod unified_tests {
         );
 
         // Verify checksum
-        assert!(validate_checksum(&buffer), "Checksum validation failed");
+        validate_checksum(&buffer).unwrap();
 
         // Convert back to bytes and verify
         let recreated_bytes = cmd_frame.to_hex();
@@ -431,9 +426,7 @@ mod unified_tests {
         );
 
         // Ensure the checksum is valid for the generated frame
-        assert!(
-            validate_checksum(&generated_bytes),
-            "Generated frame has invalid checksum"
-        );
+
+        validate_checksum(&generated_bytes).unwrap();
     }
 }

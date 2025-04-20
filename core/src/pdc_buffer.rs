@@ -1,6 +1,30 @@
-// The PDCBuffer aims to be a centralized module for interacting with a PDC server.
-// It provides a convenient interface for managing the connection to the PDC server,
-// parsing the configuration, and managing the data stream.
+// SPDX-License-Identifier: BSD-3-Clause
+//! # IEEE C37.118 PDC Server Interface
+//!
+//! This module provides `PDCBuffer`, a centralized interface for interacting with a Phasor
+//! Data Concentrator (PDC) server over TCP, as defined in IEEE C37.118-2005,
+//! IEEE C37.118.2-2011, and IEEE C37.118.2-2024 standards. It manages connections, sends
+//! command frames, parses configuration frames, and processes data streams into Arrow
+//! record batches using a producer-consumer model.
+//!
+//! ## Key Components
+//!
+//! - `PDCBuffer`: Manages the TCP connection, configuration, and data streaming with an
+//!   `AccumulatorManager` for timeseries processing.
+//!
+//! ## Usage
+//!
+//! This module is used to connect to a PDC server, request configuration, start/stop data
+//! streams, and retrieve timeseries data as Arrow record batches. It integrates with the
+//! `accumulator::manager` for data processing, `commands` for frame creation, `common` for
+//! shared types, `config` for configuration parsing, `phasors` for phasor handling, and
+//! `utils` for checksum validation, suitable for power system monitoring applications.
+//!
+//! ## Copyright and Authorship
+//!
+//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
+//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
+//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -24,6 +48,30 @@ const DEFAULT_STANDARD: Version = Version::V2011;
 const DEFAULT_MAX_BATCHES: usize = 120; // ~4 minutes at 60hz
 const DEFAULT_BATCH_SIZE: usize = 128; // ~2 seconds of data at 60hz
 
+/// Interface for interacting with a PDC server over TCP for IEEE C37.118 data.
+///
+/// This struct manages the connection to a PDC server, sends command frames, parses
+/// configuration frames, and processes data streams into Arrow record batches using a
+/// producer-consumer model with background threads for streaming.
+///
+/// # Fields
+///
+/// * `ip_addr`: IP address of the PDC server.
+/// * `port`: TCP port of the PDC server.
+/// * `id_code`: Identification code for communication with the PDC.
+/// * `_accumulators`: Configurations for regular accumulators.
+/// * `_accumulator_manager`: Thread-safe manager for processing data into record batches.
+/// * `ieee_version`: IEEE C37.118 standard version (e.g., 2011).
+/// * `config_frame`: Parsed configuration frame from the PDC.
+/// * `_data_frame_size`: Expected size of data frames.
+/// * `_batch_size`: Number of buffers per batch.
+/// * `_channels`: List of channel names (currently unimplemented).
+/// * `_pmus`: List of PMU names (currently unimplemented).
+/// * `_stations`: List of station names (currently unimplemented).
+/// * `producer_handle`: Handle for the producer thread (optional).
+/// * `consumer_handle`: Handle for the consumer thread (optional).
+/// * `shutdown_tx`: Channel for signaling shutdown (optional).
+/// * `latest_buffer_request_tx`: Channel for requesting the latest data buffer.
 pub struct PDCBuffer {
     pub ip_addr: String,
     pub port: u16,
@@ -44,8 +92,29 @@ pub struct PDCBuffer {
 }
 
 impl PDCBuffer {
-    // Methods go here
-
+    /// Creates a new PDC buffer and initializes the connection.
+    ///
+    /// Connects to the PDC server, requests the configuration frame, and sets up the
+    /// accumulator manager based on the configuration.
+    ///
+    /// # Parameters
+    ///
+    /// * `ip_addr`: IP address of the PDC server.
+    /// * `port`: TCP port of the PDC server.
+    /// * `id_code`: Identification code for communication.
+    /// * `version`: Optional IEEE C37.118 version (defaults to 2011).
+    /// * `batch_size`: Optional number of buffers per batch (defaults to 128).
+    /// * `max_batches`: Optional maximum number of batches to retain (defaults to 120).
+    /// * `output_phasor_type`: Optional output format for phasors (defaults to native).
+    ///
+    /// # Returns
+    ///
+    /// A new `PDCBuffer` instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection fails, the configuration frame is invalid, or the frame
+    /// size exceeds 65KB.
     pub fn new(
         ip_addr: String,
         port: u16,
@@ -90,8 +159,8 @@ impl PDCBuffer {
         println!("Version: {}", detected_version);
 
         let frame_size = u16::from_be_bytes([peek_buffer[2], peek_buffer[3]]);
-        // ensure frame size is less than 56 kB
-        if frame_size > 56 * 1024 {
+        // ensure frame size is less than 65 kB
+        if frame_size > 65 * 1024 {
             panic!("Frame size exceeds maximum allowable limit of 56KB!")
         }
 
@@ -115,6 +184,13 @@ impl PDCBuffer {
 
         // Determine data frame size expected by the configuration frame
         let data_frame_size = config_frame.calc_data_frame_size();
+
+        if output_phasor_type.is_none() {
+            println!("Using native phasor values. Users will need to utilize scale factors in the
+                configuration frame to properly scale the integer phasor values if present.
+                Use a FloatRect or FloatPolar output format to automatically scale the phasor values.
+                See IEEE C37.118 Documentation for more details.");
+        }
 
         let (accumulators, phasor_accumulators) =
             config_to_accumulators(&config_frame, output_phasor_type);
@@ -148,6 +224,15 @@ impl PDCBuffer {
         }
     }
 
+    /// Starts streaming data from the PDC server.
+    ///
+    /// Initiates a producer-consumer model with background threads: the producer sends a
+    /// start command and reads data frames, while the consumer validates and processes them
+    /// using the accumulator manager.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection fails.
     pub fn start_stream(&mut self) {
         // Start the stream
         //
@@ -253,8 +338,11 @@ impl PDCBuffer {
         let consumer = {
             thread::spawn(move || {
                 while let Ok(frame) = rx.recv() {
-                    if validate_checksum(&frame) == false {
-                        println!("Invalid Checksum, Skipping buffer.")
+                    match validate_checksum(&frame) {
+                        Ok(()) => (),
+                        Err(_) => {
+                            println!("Invalid Checksum, Skipping buffer.")
+                        }
                     }
 
                     // Lock the manager to process the buffer
@@ -279,6 +367,10 @@ impl PDCBuffer {
         self.shutdown_tx = Some(shutdown_tx);
     }
 
+    /// Stops streaming data from the PDC server.
+    ///
+    /// Sends a stop command, signals the producer and consumer threads to shut down, and
+    /// closes the TCP connection.
     pub fn stop_stream(&mut self) {
         println!("Stopping PDC stream");
 
@@ -305,22 +397,37 @@ impl PDCBuffer {
         }
     }
 
+    /// Converts the configuration frame to JSON.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(String)`: JSON representation of the configuration frame.
+    /// * `Err(serde_json::Error)`: If serialization fails.
     pub fn config_to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(&self.config_frame)
     }
 
-    pub fn get_pdc_configuration(&self) {
-        // Get the configuration
-        // This should return the PDC Configuration frame Struct, which
-        // has a method to convert to json.
-    }
-
+    /// Retrieves the PDC header frame.
+    ///
+    /// # Note
+    ///
+    /// Currently unimplemented; intended to return the header frame.
     pub fn get_pdc_header(&self) {
         // Get the header
         // TODO: implement the header frame.
         todo!()
     }
 
+    /// Sets the channels to stream.
+    ///
+    /// # Parameters
+    ///
+    /// * `_channels`: List of channel names to stream.
+    /// * `_channel_type`: Type of channels ("channel", "pmu", or "station").
+    ///
+    /// # Note
+    ///
+    /// Currently unimplemented; intended to filter accumulators by channels, PMUs, or stations.
     pub fn set_stream_channels(&mut self, _channels: Vec<String>, _channel_type: String) {
         // Set the stream channels
         // Set the accumulators by picking specific channels, or PMUs or stations.
@@ -329,22 +436,47 @@ impl PDCBuffer {
         // TODO: implement the channel type.
         todo!()
     }
-
+    /// Lists available channel names.
+    ///
+    /// # Returns
+    ///
+    /// A vector of channel names (currently empty, pending implementation).
     pub fn list_channels(&self) -> Vec<String> {
         // Lists the set of channels as strings based on the config.
         self._channels.clone()
     }
 
+    /// Lists available PMU names.
+    ///
+    /// # Returns
+    ///
+    /// A vector of PMU names (currently empty, pending implementation).
     pub fn list_pmus(&self) -> Vec<String> {
         // Lists the names of PMUs as strings based on the config.
         self._pmus.clone()
     }
 
+    /// Lists available station names.
+    ///
+    /// # Returns
+    ///
+    /// A vector of station names (currently empty, pending implementation).
     pub fn list_stations(&self) -> Vec<String> {
         // Lists the names of the stations as strings based on the config.
         self._stations.clone()
     }
 
+    /// Retrieves timeseries data as an Arrow record batch.
+    ///
+    /// # Parameters
+    ///
+    /// * `columns`: Optional list of column names to include (all columns if `None`).
+    /// * `window_secs`: Optional time window in seconds (all data if `None`).
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RecordBatch)`: The requested timeseries data.
+    /// * `Err(String)`: If the accumulator manager is locked or data retrieval fails.
     pub fn get_data(
         &self,
         columns: Option<Vec<&str>>, // Optional list of column names
@@ -361,6 +493,12 @@ impl PDCBuffer {
             .map_err(|e| format!("Failed to get dataframes: {:?}", e))
     }
 
+    /// Retrieves the latest data frame buffer.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<u8>)`: The latest data frame buffer.
+    /// * `Err(String)`: If the stream is not started, no data is available, or the request times out.
     pub fn get_latest_buffer(&self) -> Result<Vec<u8>, String> {
         // Create a one-shot channel for the response
         let (response_tx, response_rx) = mpsc::channel();
@@ -395,6 +533,16 @@ impl PDCBuffer {
         }
     }
 
+    /// Retrieves the location and length of a channel in the input buffer.
+    ///
+    /// # Parameters
+    ///
+    /// * `channel_name`: Name of the channel to locate.
+    ///
+    /// # Returns
+    ///
+    /// * `Some((u16, u8))`: The channel’s offset and length in the buffer.
+    /// * `None`: If the channel is not found.
     pub fn get_channel_location(&self, channel_name: &str) -> Option<(u16, u8)> {
         // Find the accumulator config for the given channel name
         self._accumulators

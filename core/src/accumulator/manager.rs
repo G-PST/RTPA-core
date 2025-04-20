@@ -1,3 +1,31 @@
+// SPDX-License-Identifier: BSD-3-Clause
+//! # IEEE C37.118 Accumulator Manager for Timeseries Data
+//!
+//! This module provides an `AccumulatorManager` for orchestrating accumulators to process
+//! IEEE C37.118 synchrophasor data buffers into Arrow record batches, as defined in
+//! IEEE C37.118-2005, IEEE C37.118.2-2011, and IEEE C37.118.2-2024 standards. It manages
+//! regular and phasor accumulators to extract timeseries variables (e.g., frequencies,
+//! phasors) and store them efficiently for analysis.
+//!
+//! ## Key Components
+//!
+//! - `AccumulatorManager`: Manages accumulators, buffers, and record batch creation.
+//! - `AccumulatorConfig`: Configuration for regular accumulators (e.g., floats, integers).
+//! - `PhasorAccumulatorConfig`: Configuration for phasor accumulators with format conversion.
+//!
+//! ## Usage
+//!
+//! This module is used to process streaming synchrophasor data from TCP sockets, accumulating
+//! measurements into Arrow record batches for timeseries analysis. It integrates with the
+//! `sparse` module’s accumulators, `phasors` module for phasor handling, and Arrow for
+//! data storage, leveraging parallel processing for efficiency in power system monitoring.
+//!
+//! ## Copyright and Authorship
+//!
+//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
+//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
+//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
+
 use super::sparse::{
     Accumulate, C37118PhasorAccumulator, C37118TimestampAccumulator, F32Accumulator,
     I16Accumulator, I32Accumulator, U16Accumulator,
@@ -16,6 +44,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MAX_BUFFER_SIZE: usize = 65 * 1024;
 const BATCH_SIZE: usize = 120;
 
+/// Configuration for regular accumulators in IEEE C37.118 data processing.
+///
+/// This struct defines the parameters for accumulating a single timeseries variable
+/// (e.g., frequency, status) from an IEEE C37.118 data buffer.
+///
+/// # Fields
+///
+/// * `var_loc`: Starting byte offset in the input buffer.
+/// * `var_len`: Length of the variable in bytes.
+/// * `scale_factor`: Scaling factor for the variable (e.g., for timestamps).
+/// * `var_type`: Arrow data type (e.g., `Float32`, `Int64`).
+/// * `name`: Column name for the output schema.
 #[derive(Debug, Clone)]
 pub struct AccumulatorConfig {
     pub var_loc: u16,
@@ -25,6 +65,19 @@ pub struct AccumulatorConfig {
     pub name: String,
 }
 
+/// Configuration for phasor accumulators in IEEE C37.118 data processing.
+///
+/// This struct defines the parameters for accumulating phasor measurements, including
+/// input and output formats, from an IEEE C37.118 data buffer.
+///
+/// # Fields
+///
+/// * `var_loc`: Starting byte offset in the input buffer.
+/// * `input_type`: Input phasor format (e.g., `FloatPolar`).
+/// * `output_type`: Desired output phasor format.
+/// * `scale_factor`: PHUNIT scaling factor for integer phasors.
+/// * `name_real`: Column name for the first component (e.g., magnitude, real).
+/// * `name_imag`: Column name for the second component (e.g., angle, imaginary).
 #[derive(Debug, Clone)]
 pub struct PhasorAccumulatorConfig {
     pub var_loc: u16,
@@ -35,6 +88,24 @@ pub struct PhasorAccumulatorConfig {
     pub name_imag: String,
 }
 
+/// Manages accumulators for processing IEEE C37.118 synchrophasor data into Arrow record batches.
+///
+/// This struct orchestrates regular and phasor accumulators to extract timeseries variables
+/// from input buffers, store them in Arrow buffers, and produce record batches for analysis,
+/// optimizing for efficiency with parallel processing and thread-safe buffer management.
+///
+/// # Fields
+///
+/// * `output_buffers`: Thread-safe Arrow buffers for each variable.
+/// * `configs`: Configurations for regular accumulators.
+/// * `phasor_configs`: Configurations for phasor accumulators.
+/// * `phasor_buffer_indices`: Indices of buffers for phasor components.
+/// * `schema`: Arrow schema defining the output record batch structure.
+/// * `records`: Thread-safe queue of timestamped record batches.
+/// * `batch_index`: Current number of processed buffers in the batch.
+/// * `max_batches`: Maximum number of batches to retain.
+/// * `buffer_size`: Maximum input buffer size (default 65KB).
+/// * `batch_size`: Number of buffers per batch (default 120).
 #[derive(Debug)]
 pub struct AccumulatorManager {
     output_buffers: Vec<Arc<Mutex<MutableBuffer>>>,
@@ -51,6 +122,21 @@ pub struct AccumulatorManager {
 }
 
 impl AccumulatorManager {
+    /// Creates a new manager with default buffer and batch sizes.
+    ///
+    /// # Parameters
+    ///
+    /// * `configs`: Configurations for regular accumulators.
+    /// * `phasor_configs`: Configurations for phasor accumulators.
+    /// * `max_batches`: Maximum number of record batches to retain.
+    ///
+    /// # Returns
+    ///
+    /// A new `AccumulatorManager` instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no valid configurations are provided or if unsupported data types are used.
     pub fn new(
         configs: Vec<AccumulatorConfig>,
         phasor_configs: Vec<PhasorAccumulatorConfig>,
@@ -65,6 +151,23 @@ impl AccumulatorManager {
         )
     }
 
+    /// Creates a new manager with custom buffer and batch sizes.
+    ///
+    /// # Parameters
+    ///
+    /// * `configs`: Configurations for regular accumulators.
+    /// * `phasor_configs`: Configurations for phasor accumulators.
+    /// * `max_batches`: Maximum number of record batches to retain.
+    /// * `buffer_size`: Maximum input buffer size.
+    /// * `batch_size`: Number of buffers per batch.
+    ///
+    /// # Returns
+    ///
+    /// A new `AccumulatorManager` instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no valid configurations are provided or if unsupported data types are used.
     pub fn new_with_params(
         configs: Vec<AccumulatorConfig>,
         phasor_configs: Vec<PhasorAccumulatorConfig>,
@@ -204,6 +307,11 @@ impl AccumulatorManager {
         }
     }
 
+    /// Creates a new manager with the same configurations.
+    ///
+    /// # Returns
+    ///
+    /// A new `AccumulatorManager` with the same configurations but fresh buffers and records.
     pub fn duplicate(&self) -> Self {
         Self::new_with_params(
             self.configs.clone(),
@@ -214,6 +322,19 @@ impl AccumulatorManager {
         )
     }
 
+    /// Processes an input buffer using configured accumulators.
+    ///
+    /// Accumulates data into output buffers, creating a record batch when the batch size is
+    /// reached. Uses thread-safe operations and parallel processing for efficiency.
+    ///
+    /// # Parameters
+    ///
+    /// * `data`: Input buffer containing IEEE C37.118 data.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())`: If processing succeeds.
+    /// * `Err(String)`: If the buffer is empty, too large, or contains unsupported data types.
     pub fn process_buffer(&mut self, data: &[u8]) -> Result<(), String> {
         if data.len() > self.buffer_size {
             return Err("Data exceeds max buffer size".to_string());
@@ -295,6 +416,9 @@ impl AccumulatorManager {
         Ok(())
     }
 
+    /// Flushes any pending batch to a record batch.
+    ///
+    /// Saves the current batch to the records queue if it contains data, clearing the buffers.
     pub fn flush_pending_batch(&mut self) {
         if self.batch_index > 0 {
             self.save_batch();
@@ -302,6 +426,10 @@ impl AccumulatorManager {
         }
     }
 
+    /// Saves the current batch to the records queue.
+    ///
+    /// Creates a record batch from the output buffers, adds a timestamp, and stores it in the
+    /// records queue, clearing the buffers afterward.
     fn save_batch(&self) {
         let has_data = self.output_buffers.iter().any(|buffer| {
             let buffer = buffer.lock().unwrap();
@@ -402,15 +530,36 @@ impl AccumulatorManager {
             .for_each(|buffer| buffer.lock().unwrap().clear());
     }
 
+    /// Shuts down the manager, flushing any pending batch.
+    ///
+    /// Ensures all accumulated data is saved before the manager is dropped.
     pub fn shutdown(mut self) {
         // Flush any pending batch before shutdown
         self.flush_pending_batch();
     }
 
+    /// Retrieves the Arrow schema for the output record batches.
+    ///
+    /// # Returns
+    ///
+    /// An `Arc<Schema>` defining the structure of the output data.
     pub fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
     }
-
+    /// Retrieves a record batch with selected columns and time window.
+    ///
+    /// Flushes any pending batch and returns a concatenated record batch for the specified
+    /// columns and time window.
+    ///
+    /// # Parameters
+    ///
+    /// * `columns`: Optional list of column names to include (all columns if `None`).
+    /// * `window_secs`: Optional time window in seconds (all data if `None`).
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RecordBatch)`: The concatenated record batch.
+    /// * `Err(String)`: If a column is not found or batch creation fails.
     pub fn get_dataframe(
         &mut self,
         columns: Option<Vec<&str>>,
@@ -434,6 +583,17 @@ impl AccumulatorManager {
         self._get_dataframe(&column_indices, window_secs.unwrap_or(u64::MAX))
     }
 
+    /// Internal method to retrieve a record batch with specified columns and time window.
+    ///
+    /// # Parameters
+    ///
+    /// * `columns`: Indices of columns to include.
+    /// * `window_secs`: Time window in seconds.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RecordBatch)`: The concatenated record batch.
+    /// * `Err(String)`: If batch creation fails or no data is available.
     pub fn _get_dataframe(
         &self,
         columns: &[usize],

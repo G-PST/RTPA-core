@@ -1,12 +1,64 @@
-use crate::accumulator::manager::{AccumulatorConfig, PhasorAccumulatorConfig};
+// SPDX-License-Identifier: BSD-3-Clause
+//! # IEEE C37.118 Configuration to Accumulator Mapping
+//!
+//! This module provides a utility function to convert IEEE C37.118 configuration frames
+//! into accumulator configurations for timeseries data processing, as defined in
+//! IEEE C37.118-2005, IEEE C37.118.2-2011, and IEEE C37.118.2-2024 standards. It maps
+//! configuration data to accumulators for timestamps, phasors, frequencies, and other
+//! measurements, enabling efficient data extraction from synchrophasor data streams.
+//!
+//! ## Key Components
+//!
+//! - `config_to_accumulators`: Converts a configuration frame into regular and phasor
+//!   accumulator configurations.
+//!
+//! ## Usage
+//!
+//! This module is used to initialize an `AccumulatorManager` with configurations derived
+//! from a PDC’s configuration frame, facilitating the processing of streaming synchrophasor
+//! data into Arrow record batches. It integrates with the `accumulator::manager` for
+//! accumulator definitions, `ieee_c37_118::config` for frame parsing, `ieee_c37_118::phasors`
+//! for phasor types, and `ieee_c37_118::units` for measurement types.
+//!
+//! ## Copyright and Authorship
+//!
+//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
+//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
+//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
+//!
+//! This software was developed under funding from the U.S. Department of Energy.
+//! The United States Government retains certain rights in this software.
 
+use crate::accumulator::manager::{AccumulatorConfig, PhasorAccumulatorConfig};
 use crate::ieee_c37_118::config::ConfigurationFrame;
 use crate::ieee_c37_118::phasors::PhasorType;
-
 use crate::ieee_c37_118::units::MeasurementType;
-
 use arrow::datatypes::DataType;
 
+/// Converts an IEEE C37.118 configuration frame into accumulator configurations.
+///
+/// Processes a configuration frame to generate configurations for regular accumulators
+/// (e.g., timestamps, frequencies, analogs) and phasor accumulators, mapping PMU
+/// measurements to timeseries variables for use in an `AccumulatorManager`.
+///
+/// # Parameters
+///
+/// * `config`: The IEEE C37.118 configuration frame.
+/// * `output_phasor_type`: Optional output format for phasors (defaults to native format).
+///
+/// # Returns
+///
+/// A tuple containing:
+/// * `Vec<AccumulatorConfig>`: Configurations for regular accumulators.
+/// * `Vec<PhasorAccumulatorConfig>`: Configurations for phasor accumulators.
+///
+/// # Note
+///
+/// - Timestamps are placed at offset 6 (after prefix) with an 8-byte length.
+/// - Phasor, frequency, ROCOF, analog, and digital measurements are processed based on
+///   PMU configuration, with offsets calculated incrementally.
+/// - Scale factors for integer phasors are derived from `PHUNIT` fields per IEEE C37.118-2011
+///   Table 9, unless overridden by `output_phasor_type`.
 pub fn config_to_accumulators(
     config: &ConfigurationFrame,
     output_phasor_type: Option<PhasorType>,

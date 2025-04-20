@@ -1,22 +1,55 @@
-// Receive repeated fixed sized buffer over a TCP socket.
-// Accumulate pieces of that buffer into individual Vec<u8>, each
-// representing timeseries variables. The vec<u8> output array, will
-// be fixed sized known at runtime. Since there will be one for each
-// timeseries variable, we want to store them close to each other in memory
-// to take advantage of cache locality and row/column cache hits in DRAM.
-//
-
-#![allow(unused)]
+// SPDX-License-Identifier: BSD-3-Clause
+//! # IEEE C37.118 TCP Socket Data Accumulators
+//!
+//! This module provides accumulators for processing fixed-size IEEE C37.118 synchrophasor
+//! data buffers received over a TCP socket, as defined in IEEE C37.118-2005,
+//! IEEE C37.118.2-2011, and IEEE C37.118.2-2024 standards. It extracts timeseries
+//! variables (e.g., phasors, timestamps) from input buffers and stores them in Arrow
+//! buffers, optimizing for cache locality and efficient memory access.
+//!
+//! ## Key Components
+//!
+//! - `Accumulator`: Enum wrapping specific accumulator types for different data formats.
+//! - `Accumulate`: Trait defining the accumulation behavior for input buffer parsing.
+//! - `F32Accumulator`, `I32Accumulator`, `I16Accumulator`, `U16Accumulator`: Accumulators
+//!   for numeric data types (float, signed/unsigned integers).
+//! - `C37118TimestampAccumulator`: Accumulator for IEEE C37.118 timestamps (seconds and
+//!   fractional seconds).
+//! - `C37118PhasorAccumulator`: Accumulator for phasor measurements with format conversion.
+//!
+//! ## Usage
+//!
+//! This module is used to process streaming synchrophasor data from TCP sockets, parsing
+//! fixed-size buffers into timeseries variables stored in Arrow buffers. It integrates
+//! with the `phasors` module for phasor data handling and Arrow’s `MutableBuffer` for
+//! efficient output storage, suitable for real-time power system monitoring applications.
+//!
+//! ## Copyright and Authorship
+//!
+//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
+//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
+//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
 use crate::ieee_c37_118::phasors::{PhasorType, PhasorValue};
 use arrow::buffer::MutableBuffer;
+
 // statically declare error messages
 const ERR_SLICE_LEN_2: &str = "Input slice must be exactly 2 bytes";
 const ERR_SLICE_LEN_4: &str = "Input slice must be exactly 4 bytes";
-//const ERR_SLICE_LEN_8: &str = "Input slice must be exactly 8 bytes";
 
-// Types of available accumulators 2 bytes each to parse up to 65KB buffers.
-
+/// Enumerates accumulator types for IEEE C37.118 data parsing.
+///
+/// This enum wraps specific accumulators for different data types (e.g., floats,
+/// integers, timestamps, phasors) extracted from IEEE C37.118 synchrophasor data
+/// buffers, enabling efficient timeseries accumulation.
+///
+/// # Variants
+///
+/// * `U16`: Accumulator for 16-bit unsigned integers.
+/// * `F32`: Accumulator for 32-bit floating-point values.
+/// * `I32`: Accumulator for 32-bit signed integers.
+/// * `I16`: Accumulator for 16-bit signed integers.
+/// * `Timestamp`: Accumulator for IEEE C37.118 timestamps.
 pub enum Accumulator {
     U16(U16Accumulator),
     F32(F32Accumulator),
@@ -37,12 +70,29 @@ impl super::sparse::Accumulate for Accumulator {
     }
 }
 
+/// Trait for accumulating data from input buffers to Arrow buffers.
+///
+/// Implementors of this trait parse specific data types from IEEE C37.118 input
+/// buffers and append them to an Arrow `MutableBuffer` in little-endian format,
+/// optimizing for cache locality in timeseries processing.
 pub trait Accumulate {
-    // Each implementation of the Accumulator needs to read from an input buffer and write to an output buffer.
+    /// Accumulates data from an input buffer to an output buffer.
+    ///
+    /// # Parameters
+    ///
+    /// * `input_buffer`: The input byte slice containing IEEE C37.118 data.
+    /// * `output_buffer`: The Arrow `MutableBuffer` to store parsed values.
     fn accumulate(&self, input_buffer: &[u8], output_buffer: &mut MutableBuffer);
 }
 
-// 2 bytes of alignment.
+/// Accumulator for 32-bit floating-point values in IEEE C37.118 data.
+///
+/// This struct extracts 32-bit floats from a specified location in an input buffer
+/// and stores them in an Arrow buffer in little-endian format.
+///
+/// # Fields
+///
+/// * `var_loc`: The starting byte offset in the input buffer.
 #[repr(align(2))]
 pub struct F32Accumulator {
     pub var_loc: u16,
@@ -59,6 +109,14 @@ impl Accumulate for F32Accumulator {
     }
 }
 
+/// Accumulator for 32-bit signed integer values in IEEE C37.118 data.
+///
+/// This struct extracts 32-bit signed integers from a specified location in an input
+/// buffer and stores them in an Arrow buffer in little-endian format.
+///
+/// # Fields
+///
+/// * `var_loc`: The starting byte offset in the input buffer.
 #[repr(align(2))]
 pub struct I32Accumulator {
     pub var_loc: u16,
@@ -75,6 +133,14 @@ impl Accumulate for I32Accumulator {
     }
 }
 
+/// Accumulator for 16-bit signed integer values in IEEE C37.118 data.
+///
+/// This struct extracts 16-bit signed integers from a specified location in an input
+/// buffer and stores them in an Arrow buffer in little-endian format.
+///
+/// # Fields
+///
+/// * `var_loc`: The starting byte offset in the input buffer.
 #[repr(align(2))]
 pub struct I16Accumulator {
     pub var_loc: u16,
@@ -91,6 +157,14 @@ impl Accumulate for I16Accumulator {
     }
 }
 
+/// Accumulator for 16-bit unsigned integer values in IEEE C37.118 data.
+///
+/// This struct extracts 16-bit unsigned integers from a specified location in an input
+/// buffer and stores them in an Arrow buffer in little-endian format.
+///
+/// # Fields
+///
+/// * `var_loc`: The starting byte offset in the input buffer.
 #[repr(align(2))]
 pub struct U16Accumulator {
     pub var_loc: u16,
@@ -106,6 +180,20 @@ impl Accumulate for U16Accumulator {
     }
 }
 
+/// Accumulator for IEEE C37.118 timestamps.
+///
+/// This struct extracts 8-byte timestamps (4-byte seconds since UNIX epoch, 3-byte
+/// fractional seconds, 1-byte leap second indicator) from an input buffer and stores
+/// them as 64-bit nanosecond timestamps in an Arrow buffer.
+///
+/// # Fields
+///
+/// * `var_loc`: The starting byte offset in the input buffer.
+/// * `time_base_ns`: Time base for scaling fractional seconds to nanoseconds.
+///
+/// # Note
+///
+/// A TODO indicates potential addition of time base scaling to the struct.
 #[repr(align(2))]
 pub struct C37118TimestampAccumulator {
     pub var_loc: u16,
@@ -140,6 +228,18 @@ impl Accumulate for C37118TimestampAccumulator {
     }
 }
 
+/// Accumulator for IEEE C37.118 phasor measurements.
+///
+/// This struct extracts phasor data (polar or rectangular, integer or float) from an
+/// input buffer, converts it to a specified output format, and stores the components
+/// in separate Arrow buffers for efficient timeseries processing.
+///
+/// # Fields
+///
+/// * `var_loc`: The starting byte offset in the input buffer.
+/// * `input_type`: The input phasor format (e.g., `FloatPolar`).
+/// * `output_type`: The desired output phasor format.
+/// * `scale_factor`: PHUNIT scaling factor for integer phasors.
 #[derive(Debug, Clone)]
 pub struct C37118PhasorAccumulator {
     pub var_loc: u16,
@@ -149,7 +249,17 @@ pub struct C37118PhasorAccumulator {
 }
 
 impl C37118PhasorAccumulator {
-    // New method that takes two buffers - one for each component
+    /// Accumulates phasor data into two separate Arrow buffers.
+    ///
+    /// # Parameters
+    ///
+    /// * `input_buffer`: The input byte slice containing phasor data.
+    /// * `component1_buffer`: Arrow buffer for the first component (e.g., magnitude, real).
+    /// * `component2_buffer`: Arrow buffer for the second component (e.g., angle, imaginary).
+    ///
+    /// # Panics
+    ///
+    /// Panics if phasor parsing fails or if scaling is required but unavailable.
     pub fn accumulate(
         &self,
         input_buffer: &[u8],
@@ -217,10 +327,7 @@ mod tests {
         let input = vec![
             0x41, 0x20, 0x00, 0x00, // f32: 10.0 in big-endian
             0x00, 0x00, 0x00, 0x0A, // i32: 10 in big-endian
-            0x00,
-            0x14, // u16: 20 in big-endian
-
-                  // TODO add tests for timestamp accumulator and null f32 value.
+            0x00, 0x14, // u16: 20 in big-endian
         ];
 
         let f32_acc = F32Accumulator { var_loc: 0 };

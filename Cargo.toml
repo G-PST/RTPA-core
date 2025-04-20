@@ -1,5 +1,14 @@
 [workspace]
 members = ["core", "cli", "py"]
+resolver = "2"
+
+[workspace.package]
+authors = [
+    "Micah Webb <micah.webb@nrel.gov>",
+    "National Renewable Energy Laboratory (NREL)",
+]
+license = "BSD-3-Clause"
+edition = "2021"
 
 # Optional: Set the default member for cargo commands
 default-members = ["cli"]
