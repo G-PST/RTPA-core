@@ -1,5 +1,5 @@
 # Must Complete
-2. Ability to select a combination of channels, columns or pmus to accumulate.
+2. Ability to select a combination of channels, columns or pmus to accumulate. (Done)
 3. Use UDP for streaming, TCP for command frames. (We don't want to risk backlogging their network.)
 6. Fix DigitalChannels or don't accumulate. (Only Breaker 1 Status shows up, should be 16.)
 
@@ -7,7 +7,7 @@
 # Nice to have
 1. Convert from V to kV for phasor data.
 2. Convert between Radians and Degrees.
-3. Use a DateTime mutable buffer instead of a i64 (nice to have)
+3. Use a DateTime mutable buffer instead of a i64 (Done)
 4. Fix STAT field. Optionally drop values that don't meet a certain time measurement quality.
 5. Comments for intellisense and documentation.
 6. Expose the IEEE standard module as python modules. (Nice to have)

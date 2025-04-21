@@ -19,12 +19,9 @@ Usage:
     Ensure the `rtpa` package is installed and the server supports IEEE C37.118.
 
 Copyright and Authorship:
-    Copyright (c) 2024 Alliance for Sustainable Energy, LLC.
-    Developed by Jane Doe at the National Renewable Energy Laboratory (NREL).
+    Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
+    Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
     Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
-
-    This software was developed under funding from the U.S. Department of Energy.
-    The United States Government retains certain rights in this software.
 """
 
 from rtpa import PDCBuffer

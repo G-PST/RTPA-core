@@ -31,9 +31,11 @@ use super::sparse::{
     I16Accumulator, I32Accumulator, U16Accumulator,
 };
 use crate::ieee_c37_118::phasors::PhasorType;
-use arrow::array::{ArrayRef, Float32Array, Int16Array, Int32Array, Int64Array, UInt16Array};
+use arrow::array::{
+    ArrayRef, Float32Array, Int16Array, Int32Array, TimestampNanosecondArray, UInt16Array,
+};
 use arrow::buffer::{Buffer, MutableBuffer};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use rayon::prelude::*;
 use std::collections::VecDeque;
@@ -253,7 +255,9 @@ impl AccumulatorManager {
                 DataType::Int32 => batch_size * std::mem::size_of::<i32>(),
                 DataType::Int16 => batch_size * std::mem::size_of::<i16>(),
                 DataType::UInt16 => batch_size * std::mem::size_of::<u16>(),
-                DataType::Int64 => batch_size * std::mem::size_of::<i64>(),
+                DataType::Timestamp(TimeUnit::Nanosecond, None) => {
+                    batch_size * std::mem::size_of::<i64>()
+                }
                 _ => panic!("Unsupported data type: {:?}", config.var_type),
             };
             output_buffers.push(Arc::new(Mutex::new(MutableBuffer::new(capacity))));
@@ -374,7 +378,7 @@ impl AccumulatorManager {
                     };
                     acc.accumulate(data, &mut buffer_guard);
                 }
-                DataType::Int64 => {
+                DataType::Timestamp(TimeUnit::Nanosecond, _) => {
                     let acc = C37118TimestampAccumulator {
                         var_loc: config.var_loc,
                         time_base_ns: (config.scale_factor as i64 / 1_000_000_000) as u32,
@@ -493,7 +497,7 @@ impl AccumulatorManager {
                         };
                         Arc::new(Int16Array::from(values.to_vec())) as ArrayRef
                     }
-                    DataType::Int64 => {
+                    DataType::Timestamp(TimeUnit::Nanosecond, _) => {
                         let num_values = data_buffer.len() / std::mem::size_of::<i64>();
                         let values = unsafe {
                             std::slice::from_raw_parts(
@@ -501,7 +505,7 @@ impl AccumulatorManager {
                                 num_values,
                             )
                         };
-                        Arc::new(Int64Array::from(values.to_vec())) as ArrayRef
+                        Arc::new(TimestampNanosecondArray::from(values.to_vec())) as ArrayRef
                     }
                     _ => panic!("Unsupported data type: {:?}", data_type),
                 }
@@ -623,7 +627,9 @@ impl AccumulatorManager {
                     DataType::Int32 => Arc::new(Int32Array::from(Vec::<i32>::new())) as ArrayRef,
                     DataType::UInt16 => Arc::new(UInt16Array::from(Vec::<u16>::new())) as ArrayRef,
                     DataType::Int16 => Arc::new(Int16Array::from(Vec::<i16>::new())) as ArrayRef,
-                    DataType::Int64 => Arc::new(Int64Array::from(Vec::<i64>::new())) as ArrayRef,
+                    DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+                        Arc::new(TimestampNanosecondArray::from(Vec::<i64>::new())) as ArrayRef
+                    }
                     dt => panic!("Unsupported data type: {:?}", dt),
                 })
                 .collect();
@@ -688,8 +694,8 @@ impl AccumulatorManager {
                         DataType::Int16 => {
                             Arc::new(Int16Array::from(Vec::<i16>::new())) as ArrayRef
                         }
-                        DataType::Int64 => {
-                            Arc::new(Int64Array::from(Vec::<i64>::new())) as ArrayRef
+                        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+                            Arc::new(TimestampNanosecondArray::from(Vec::<i64>::new())) as ArrayRef
                         }
                         _ => panic!("Unsupported data type: {:?}", data_type),
                     }

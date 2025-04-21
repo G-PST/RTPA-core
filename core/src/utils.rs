@@ -33,7 +33,7 @@ use crate::accumulator::manager::{AccumulatorConfig, PhasorAccumulatorConfig};
 use crate::ieee_c37_118::config::ConfigurationFrame;
 use crate::ieee_c37_118::phasors::PhasorType;
 use crate::ieee_c37_118::units::MeasurementType;
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, TimeUnit};
 
 /// Converts an IEEE C37.118 configuration frame into accumulator configurations.
 ///
@@ -62,6 +62,7 @@ use arrow::datatypes::DataType;
 pub fn config_to_accumulators(
     config: &ConfigurationFrame,
     output_phasor_type: Option<PhasorType>,
+    filter_ids: Option<Vec<u16>>,
 ) -> (Vec<AccumulatorConfig>, Vec<PhasorAccumulatorConfig>) {
     // Takes a IEEE c37.118 configuration frame struct and converts it to vectors of accumulator configs
 
@@ -69,7 +70,7 @@ pub fn config_to_accumulators(
     let mut accumulators: Vec<AccumulatorConfig> = vec![AccumulatorConfig {
         var_loc: 6,
         var_len: 8,
-        var_type: DataType::Int64,
+        var_type: DataType::Timestamp(TimeUnit::Nanosecond, None),
         scale_factor: config.time_base,
         name: "DATETIME".to_string(),
     }];
@@ -84,7 +85,18 @@ pub fn config_to_accumulators(
         Some(value) => println!("Converting phasor data to: {}", value),
         None => println!("Raw Phasor data is being accumulated. Integer phasor data must be scaled according to PHUNIT/10E5"),
     }
-    for pmu_config in &config.pmu_configs {
+
+    // Filter PMU configurations based on id_codes if provided
+    let pmu_configs: Vec<_> = match filter_ids {
+        Some(ids) => config
+            .pmu_configs
+            .iter()
+            .filter(|pmu| ids.contains(&pmu.idcode))
+            .collect(),
+        None => config.pmu_configs.iter().collect(),
+    };
+
+    for pmu_config in pmu_configs {
         let station_name = String::from_utf8_lossy(&pmu_config.stn).trim().to_string();
 
         // Process phasors

@@ -218,7 +218,7 @@ impl PDCBuffer {
     ///
     /// Raises:
     ///     RuntimeError: If not connected (call `connect()` first).
-    fn list_pmus(&self) -> PyResult<Vec<String>> {
+    fn list_pmus(&self) -> PyResult<Vec<(String, u16)>> {
         match &self.inner {
             Some(buffer) => Ok(buffer.list_pmus()),
             None => Err(pyo3::exceptions::PyRuntimeError::new_err(
@@ -227,16 +227,60 @@ impl PDCBuffer {
         }
     }
 
-    /// Lists the channels in the PDC stream.
+    /// Sets the PMU filter to include only specified PMUs or all PMUs.
     ///
-    /// Returns:
-    ///     list[str]: A list of channel names.
+    /// Stops any active streaming, reconfigures the accumulators to include only the specified
+    /// PMUs (by ID codes), and resets the accumulator manager. If `id_codes` is None, includes
+    /// all PMUs.
+    ///
+    /// Parameters:
+    ///     id_codes (list[int], optional): List of PMU ID codes to filter accumulators.
+    ///         Defaults to None, which includes all PMUs.
+    ///     output_format (str, optional): The phasor output format ("FloatPolar" or "FloatRect").
+    ///         Defaults to None, which uses the default format.
     ///
     /// Raises:
     ///     RuntimeError: If not connected (call `connect()` first).
-    fn list_channels(&self) -> PyResult<Vec<String>> {
-        match &self.inner {
-            Some(buffer) => Ok(buffer.list_channels()),
+    ///     ValueError: If the output_format is invalid or if the filter cannot be applied.
+    ///
+    /// Returns:
+    ///     None
+    #[pyo3(
+            text_signature = "(id_codes=None, output_format=None)",
+            signature=(id_codes = None, output_format = None))]
+    fn set_pmu_filter(
+        &mut self,
+        id_codes: Option<Vec<u16>>,
+        output_format: Option<String>,
+    ) -> PyResult<()> {
+        match &mut self.inner {
+            Some(buffer) => {
+                let phasor_type_enum = match output_format {
+                    Some(pt) => match pt.as_str() {
+                        "FloatPolar" | "FloatRect" => Some(
+                            ::rtpa_core::ieee_c37_118::phasors::PhasorType::from_str(&pt).map_err(
+                                |e| pyo3::exceptions::PyValueError::new_err(e.to_string()),
+                            )?,
+                        ),
+                        _ => {
+                            return Err(pyo3::exceptions::PyValueError::new_err(
+                                "output_format must be one of: 'FloatPolar', 'FloatRect', or None",
+                            ))
+                        }
+                    },
+                    None => None,
+                };
+
+                buffer
+                    .set_pmu_filter(id_codes, phasor_type_enum)
+                    .map_err(|e| {
+                        pyo3::exceptions::PyValueError::new_err(format!(
+                            "Failed to set PMU filter: {}",
+                            e
+                        ))
+                    })?;
+                Ok(())
+            }
             None => Err(pyo3::exceptions::PyRuntimeError::new_err(
                 "Not connected. Call connect() first",
             )),

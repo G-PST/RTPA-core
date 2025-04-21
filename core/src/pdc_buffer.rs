@@ -47,6 +47,7 @@ use crate::utils::config_to_accumulators;
 const DEFAULT_STANDARD: Version = Version::V2011;
 const DEFAULT_MAX_BATCHES: usize = 120; // ~4 minutes at 60hz
 const DEFAULT_BATCH_SIZE: usize = 128; // ~2 seconds of data at 60hz
+const DEFAULT_TIMEOUT: u64 = 5; // 5 seconds timeout
 
 /// Interface for interacting with a PDC server over TCP for IEEE C37.118 data.
 ///
@@ -137,6 +138,14 @@ impl PDCBuffer {
 
         let mut stream = TcpStream::connect(format!("{}:{}", ip_addr, port)).unwrap();
 
+        // Set read and write timeouts
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(DEFAULT_TIMEOUT)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_secs(DEFAULT_TIMEOUT)))
+            .unwrap();
+
         // default to the 2011 standard.
         // Use the methods for CommandFrame to generate a CommandFrame to request data.
         // TODO we need to implement a function to create the command frame based on version desired.
@@ -160,8 +169,8 @@ impl PDCBuffer {
 
         let frame_size = u16::from_be_bytes([peek_buffer[2], peek_buffer[3]]);
         // ensure frame size is less than 65 kB
-        if frame_size > 65 * 1024 {
-            panic!("Frame size exceeds maximum allowable limit of 56KB!")
+        if frame_size > u16::MAX {
+            panic!("Frame size exceeds maximum allowable limit of 65535 bytes!")
         }
 
         let remaining_size = frame_size as usize - 4;
@@ -193,7 +202,7 @@ impl PDCBuffer {
         }
 
         let (accumulators, phasor_accumulators) =
-            config_to_accumulators(&config_frame, output_phasor_type);
+            config_to_accumulators(&config_frame, output_phasor_type, None);
 
         let accumulator_manager = AccumulatorManager::new_with_params(
             accumulators.clone(),
@@ -250,6 +259,15 @@ impl PDCBuffer {
         //
         let stream = TcpStream::connect(format!("{}:{}", self.ip_addr, self.port))
             .expect("Failed to connect");
+
+        // Set read and write timeouts
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(DEFAULT_TIMEOUT)))
+            .expect("Failed to set TCP read timeout");
+
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_secs(DEFAULT_TIMEOUT)))
+            .expect("Failed to set TCP write timeout");
 
         let (tx, rx): (SyncSender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::sync_channel(100);
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
@@ -418,52 +436,70 @@ impl PDCBuffer {
         todo!()
     }
 
-    /// Sets the channels to stream.
+    /// Resets the accumulator configuration to filter by a specified set of PMU ID codes or all PMUs.
+    ///
+    /// Stops any active streaming, creates new accumulator configurations filtered by the provided
+    /// `id_codes`, and replaces the accumulator manager with a new one, resetting all internal data.
+    /// If `id_codes` is `None`, accumulators for all PMUs are included.
     ///
     /// # Parameters
     ///
-    /// * `_channels`: List of channel names to stream.
-    /// * `_channel_type`: Type of channels ("channel", "pmu", or "station").
-    ///
-    /// # Note
-    ///
-    /// Currently unimplemented; intended to filter accumulators by channels, PMUs, or stations.
-    pub fn set_stream_channels(&mut self, _channels: Vec<String>, _channel_type: String) {
-        // Set the stream channels
-        // Set the accumulators by picking specific channels, or PMUs or stations.
-        // Must be in the lists of channels, PMUs, or stations.
-        // Channel type can be "channel", "pmu", or "station".
-        // TODO: implement the channel type.
-        todo!()
-    }
-    /// Lists available channel names.
+    /// * `id_codes`: Optional list of PMU ID codes to filter accumulators (all PMUs if `None`).
+    /// * `output_phasor_type`: Optional output format for phasors (defaults to native).
     ///
     /// # Returns
     ///
-    /// A vector of channel names (currently empty, pending implementation).
-    pub fn list_channels(&self) -> Vec<String> {
-        // Lists the set of channels as strings based on the config.
-        self._channels.clone()
+    /// * `Ok(())`: If the reset is successful.
+    /// * `Err(String)`: If the accumulator manager cannot be locked or initialized.
+    pub fn set_pmu_filter(
+        &mut self,
+        id_codes: Option<Vec<u16>>,
+        output_phasor_type: Option<PhasorType>,
+    ) -> Result<(), String> {
+        // Stop any active streaming to ensure thread safety
+        self.stop_stream();
+
+        // Generate new accumulator configurations
+        let (new_accumulators, new_phasor_accumulators) =
+            config_to_accumulators(&self.config_frame, output_phasor_type, id_codes);
+
+        // Create a new AccumulatorManager
+        let new_manager = AccumulatorManager::new_with_params(
+            new_accumulators.clone(),
+            new_phasor_accumulators,
+            DEFAULT_MAX_BATCHES,
+            self._data_frame_size,
+            self._batch_size,
+        );
+
+        // Update the accumulators and manager
+        self._accumulators = new_accumulators;
+        let mut manager = self
+            ._accumulator_manager
+            .lock()
+            .map_err(|e| format!("Failed to lock accumulator manager: {}", e))?;
+        *manager = new_manager;
+
+        println!("Accumulator configuration reset successfully");
+        Ok(())
     }
 
-    /// Lists available PMU names.
+    /// Lists available PMU station names and their corresponding ID codes.
     ///
     /// # Returns
     ///
-    /// A vector of PMU names (currently empty, pending implementation).
-    pub fn list_pmus(&self) -> Vec<String> {
-        // Lists the names of PMUs as strings based on the config.
-        self._pmus.clone()
-    }
-
-    /// Lists available station names.
-    ///
-    /// # Returns
-    ///
-    /// A vector of station names (currently empty, pending implementation).
-    pub fn list_stations(&self) -> Vec<String> {
-        // Lists the names of the stations as strings based on the config.
-        self._stations.clone()
+    /// A vector of tuples containing `(station_name, id_code)` for each PMU in the configuration.
+    pub fn list_pmus(&self) -> Vec<(String, u16)> {
+        self.config_frame
+            .pmu_configs
+            .iter()
+            .map(|pmu| {
+                (
+                    String::from_utf8_lossy(&pmu.stn).trim().to_string(),
+                    pmu.idcode,
+                )
+            })
+            .collect()
     }
 
     /// Retrieves timeseries data as an Arrow record batch.

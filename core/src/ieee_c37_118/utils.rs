@@ -27,14 +27,7 @@ use super::common::ParseError;
 /// # Returns
 ///
 /// The calculated 16-bit CRC checksum.
-///
-/// # Examples
-///
-/// ```
-/// let data = [0xAA, 0xBB, 0xCC];
-/// let crc = calculate_crc(&data);
-/// assert_eq!(crc, some_expected_value);
-/// ```
+
 pub fn calculate_crc(buffer: &[u8]) -> u16 {
     let mut crc: u16 = 0xFFFF;
     for &byte in buffer {
@@ -65,16 +58,7 @@ pub fn calculate_crc(buffer: &[u8]) -> u16 {
 /// * `Ok(())` if the checksum is valid.
 /// * `Err(ParseError::InvalidLength)` if the buffer is too short.
 /// * `Err(ParseError::InvalidChecksum)` if the checksum does not match.
-///
-/// # Examples
-///
-/// ```
-/// let valid_buffer = [0xAA, 0xBB, 0xCC, 0x12, 0x34]; // Last two bytes are CRC
-/// assert!(validate_checksum(&valid_buffer).is_ok());
-///
-/// let invalid_buffer = [0xAA, 0xBB, 0xCC, 0xFF, 0xFF];
-/// assert!(validate_checksum(&invalid_buffer).is_err());
-/// ```
+
 pub fn validate_checksum(buffer: &[u8]) -> Result<(), ParseError> {
     if buffer.len() < 2 {
         return Err(ParseError::InvalidLength {
