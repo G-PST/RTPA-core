@@ -10,9 +10,6 @@ authors = [
 license = "BSD-3-Clause"
 edition = "2021"
 
-# Optional: Set the default member for cargo commands
-default-members = ["cli"]
-
 # Optional: Shared dependencies to ensure version consistency
 [workspace.dependencies]
 arrow = { version = "54.3.1", features = ["ipc", "pyarrow"] }
@@ -32,3 +29,6 @@ rayon = "1.10.0"
 pyo3 = { version = "0.23.3", features = ["extension-module"] }
 criterion = { version = "0.5.1", features = ["html_reports"] }
 rand = "0.9.0"
+
+[workspace.metadata.maturin]
+python-source = "py"
