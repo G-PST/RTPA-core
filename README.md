@@ -18,6 +18,25 @@ Running the CLI using
 cargo run --help
 ```
 
+## Building the Python Module
+
+Install dependencies into a python environment.
+
+`pip install maturin patchelf`
+
+Navigate to the **py** directory and build+install the python wheel. 
+
+`cd py`
+
+`maturin develop`
+
+To build a release wheel.
+
+`maturin build --release`
+
+To test the build start up a mock pdc using `cargo run -p rtpa_cli mock-pdc` and run the **test_openpdc.py** file.
+
+
 ## Running With Docker-Compose
 
 ### Using the mock-pdc server (all platforms)
@@ -65,8 +84,11 @@ You can also install the latest release of openPDC with more features [here](htt
 
 ### ... start the Mock PDC server
 
+Run the mock-pdc with variable number of PMUs. (Max of ~130 PMUs)
+If --num-pmus not given, the mock-pdc will send repeated copies of the IEEE example data frame, with updated timestamps.
+
 ```console
-cargo run mock-pdc
+cargo run -p rtpa_cli mock-pdc --num-pmus=100
 ```
 
 ### ... start the Mock PDC server in a non-default IP/PORT

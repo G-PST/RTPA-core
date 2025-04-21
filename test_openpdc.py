@@ -75,6 +75,10 @@ size_in_bytes = df.memory_usage(deep=True).sum()
 size_in_mb = size_in_bytes / (1024 * 1024)
 print(f"Size in MB: {size_in_mb:.2f}")
 
+print("Number of rows")
+# Print the number of rows in the DataFrame
+print(f"Num rows: {len(df)}")
+
 # Print the time range of the data
 print("Start and end Time")
 print(df['DATETIME'].max(), df['DATETIME'].min())
