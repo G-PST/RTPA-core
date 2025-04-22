@@ -190,33 +190,23 @@ impl Accumulate for U16Accumulator {
 #[repr(align(2))]
 pub struct C37118TimestampAccumulator {
     pub var_loc: u16,
-    pub time_base_ns: u32,
+    pub time_base: u32,
     // TODO: Add time_base to struct for scaling fracsec
 }
 impl Accumulate for C37118TimestampAccumulator {
     fn accumulate(&self, input_buffer: &[u8], output_buffer: &mut MutableBuffer) {
         let loc = self.var_loc as usize;
+        let time_buffer = &input_buffer[loc..loc + 8];
 
         // IEEE C37.118 timestamp: 8 bytes total
         // - First 4 bytes: seconds since UNIX epoch (u32, big-endian)
         // - Leap Second Indicator (u8) (skip)
         // - Last 3 bytes: fraction of a second in microseconds (u32, big-endian)
-        let seconds = &input_buffer[loc..loc + 4];
 
-        let err_msg = "slice length must be 4";
-        let seconds = u32::from_be_bytes(seconds.try_into().expect(err_msg));
-        // Microseconds is u24 but will pad to u32
-        let microseconds = u32::from_be_bytes([
-            0,
-            input_buffer[loc + 5],
-            input_buffer[loc + 6],
-            input_buffer[loc + 7],
-        ]);
-
-        // combine into single i64 timestamp in nanoseconds
-        // seconds * 1e9 + microseconds * 1e3
         let timestamp_ns =
-            (seconds as i64 * 1_000_000_000) + (microseconds as i64 * self.time_base_ns as i64);
+            crate::ieee_c37_118::utils::timestamp_from_hex(time_buffer, self.time_base);
+
+        // Write the timestamp as little-endian to the output buffer
         output_buffer.extend_from_slice(&timestamp_ns.to_le_bytes());
     }
 }
@@ -345,7 +335,7 @@ mod tests {
     fn test_timestamp_acc() {
         // IEEE C37.118-2011 Timestamp example
         //
-        let time_base: u32 = u32::from_be_bytes([0x00, 0x0F, 0x42, 0x40]); // in 1_000_000 microseconds
+        let time_base: u32 = u32::from_be_bytes([0x00, 0x0F, 0x42, 0x40]); // in 1_000 microseconds
         let time_base_ns = 1_000_000_000 / time_base; //
         assert_eq!(time_base_ns, 1_000, "time base should be 1000");
 
@@ -357,7 +347,7 @@ mod tests {
         let mut output = MutableBuffer::new(16); // Space for a few values
         let timestamp_acc = C37118TimestampAccumulator {
             var_loc: 0,
-            time_base_ns,
+            time_base,
         };
         timestamp_acc.accumulate(&soc_fracsec_buff, &mut output);
         let bytes = output.as_slice();
@@ -365,6 +355,87 @@ mod tests {
         assert_eq!(
             timestamp_val, 1_149_580_800_016_817_000,
             "timestamp value should be 1_149_580_800_016_817_000"
+        );
+        let microseconds = (timestamp_val % 1_000_000_000) / 1000;
+        assert_eq!(
+            microseconds, 16_817,
+            "Microsecond component should be exactly 16,817"
+        );
+    }
+    #[test]
+    fn test_timestamp_accumulator_with_utils() {
+        // This test verifies that C37118TimestampAccumulator correctly uses
+        // the timestamp_from_hex function to parse timestamps with microsecond precision
+
+        // Time base in units per second (1 million = microsecond precision)
+        let time_base: u32 = 1_000_000;
+
+        // Create known timestamp buffer: 2023-01-01 00:00:00.654321 UTC
+        let seconds_since_epoch = 1_672_531_200;
+        let microseconds = 654_321;
+
+        let mut timestamp_buffer = [0u8; 8];
+
+        // Set seconds
+        timestamp_buffer[0..4].copy_from_slice(&(seconds_since_epoch as u32).to_be_bytes());
+
+        // Set fracsec
+        let fracsec = ((microseconds as u64 * time_base as u64) / 1_000_000) as u32;
+        timestamp_buffer[4..8].copy_from_slice(&fracsec.to_be_bytes());
+
+        // Parse using the accumulator
+        let mut output = MutableBuffer::new(8);
+
+        let timestamp_acc = C37118TimestampAccumulator {
+            var_loc: 0,
+            time_base,
+        };
+
+        timestamp_acc.accumulate(&timestamp_buffer, &mut output);
+
+        // Extract the timestamp value
+        let bytes = output.as_slice();
+        let timestamp_ns = i64::from_le_bytes(bytes[0..8].try_into().unwrap());
+
+        // Expected nanosecond timestamp
+        let expected_ns = seconds_since_epoch as i64 * 1_000_000_000 + microseconds as i64 * 1_000;
+
+        assert_eq!(
+            timestamp_ns, expected_ns,
+            "Timestamp should match the expected value with microsecond precision"
+        );
+
+        // Extract microseconds
+        let actual_micros = (timestamp_ns % 1_000_000_000) / 1000;
+
+        assert_eq!(
+            actual_micros, microseconds as i64,
+            "Microsecond precision should be preserved"
+        );
+
+        // Test the specific example from the original test
+        let sample_buffer: [u8; 8] = [
+            0x44, 0x85, 0x36, 0x00, // SOC: 1_149_580_800 in big-endian
+            0x00, // Leap second indicator (not used)
+            0x00, 0x41, 0xB1, // FRACSEC: 16_817 in big-endian
+        ];
+
+        output.clear();
+        timestamp_acc.accumulate(&sample_buffer, &mut output);
+
+        let sample_timestamp = i64::from_le_bytes(output.as_slice()[0..8].try_into().unwrap());
+        let expected_sample_ns = 1_149_580_800_000_000_000 + 16_817_000;
+
+        assert_eq!(
+            sample_timestamp, expected_sample_ns,
+            "Sample timestamp should match expected value with microsecond precision"
+        );
+
+        // Extract microseconds to verify
+        let sample_micros = (sample_timestamp % 1_000_000_000) / 1000;
+        assert_eq!(
+            sample_micros, 16_817,
+            "Sample microseconds should be exactly 16,817"
         );
     }
 }

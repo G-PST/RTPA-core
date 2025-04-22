@@ -374,7 +374,7 @@ impl AccumulatorManager {
                 DataType::Timestamp(TimeUnit::Nanosecond, _) => {
                     let acc = C37118TimestampAccumulator {
                         var_loc: config.var_loc,
-                        time_base_ns: (config.scale_factor as i64 / 1_000_000_000) as u32,
+                        time_base: config.scale_factor,
                     };
                     acc.accumulate(data, &mut buffer_guard);
                 }
