@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Common Types and Utilities
 //!
 //! This module defines core types and utilities for parsing and constructing IEEE C37.118
@@ -27,14 +26,7 @@
 //! This module is used by other crates in the repository to parse and validate IEEE
 //! C37.118 frames, ensuring compatibility across different standard versions. It provides
 //! low-level utilities for constructing and interpreting frame headers and status fields.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
-#![allow(unused)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

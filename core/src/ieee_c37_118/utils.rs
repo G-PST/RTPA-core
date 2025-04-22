@@ -1,19 +1,12 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Frame Parsing Utilities
 //!
 //! This module provides functions for parsing IEEE C37.118 frames, typically operating on
 //! buffers or bytes and returning enums or smaller results. It includes utilities for
 //! calculating and validating Cyclic Redundancy Check (CRC) checksums as specified in
 //! IEEE C37.118.2-2011 Appendix B.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
 use super::common::ParseError;
-
+use std::time::SystemTime;
 /// Calculates the CRC-CCITT checksum for a given buffer.
 ///
 /// This implementation follows the CRC-CCITT algorithm as specified in
@@ -78,4 +71,46 @@ pub fn validate_checksum(buffer: &[u8]) -> Result<(), ParseError> {
         });
     }
     Ok(())
+}
+
+pub fn now_to_hex(time_base: u32) -> [u8; 8] {
+    let mut buf = [0u8; 8];
+
+    // Get current time since Unix epoch
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+
+    // Get the seconds and convert to u32
+    let seconds = now.as_secs() as u32;
+
+    // Get the fraction of the seconds and convert according to time_base
+    // time_base represents the number of counts per second
+    let fracsec =
+        ((now.subsec_nanos() as u64 * time_base as u64) / 1_000_000_000) as u32 & 0x00FFFFFF;
+
+    // Write seconds to the first 4 bytes (big-endian)
+    buf[0..4].copy_from_slice(&seconds.to_be_bytes());
+
+    // Write fraction of seconds to the last 4 bytes (big-endian)
+    buf[4..8].copy_from_slice(&fracsec.to_be_bytes());
+
+    buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_now_to_hex_time_quality_byte() {
+        // Test with different time_base values to ensure 5th byte is always zero
+        for time_base in [1, 10, 100, 1000, 10000, 100000] {
+            let time_hex = now_to_hex(time_base);
+            assert_eq!(
+                time_hex[4], 0,
+                "The 5th byte (time quality) should always be zero"
+            );
+        }
+    }
 }

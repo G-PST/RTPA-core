@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Configuration Frame Utilities
 //!
 //! This module provides functionality for parsing and constructing IEEE C37.118
@@ -21,17 +20,11 @@
 //! to understand PMU data structures and channel metadata. It integrates with the
 //! `common` module for shared types, the `units` module for measurement units, and the
 //! `utils` module for CRC validation.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
-#![allow(unused)]
+
 use crate::ieee_c37_118::common::FrameType;
 
-use super::common::{ChannelDataType, ChannelInfo, ParseError, PrefixFrame, Version};
-use super::units::{AnalogUnits, DataRate, DigitalUnits, NominalFrequency, PhasorUnits};
+use super::common::{ChannelDataType, ChannelInfo, ParseError, PrefixFrame};
+use super::units::{AnalogUnits, NominalFrequency, PhasorUnits};
 use super::utils::validate_checksum;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -85,7 +78,7 @@ impl PMUConfigurationFrame {
     ///
     /// * `Ok(PMUConfigurationFrame)`: The parsed PMU configuration.
     /// * `Err(ParseError)`: If the byte slice is malformed or too short.
-    pub fn from_hex(bytes: &[u8], version: Version) -> Result<Self, ParseError> {
+    pub fn from_hex(bytes: &[u8]) -> Result<Self, ParseError> {
         let mut offset = 0;
         let stn = bytes[offset..offset + 16].try_into().unwrap();
         offset += 16;
@@ -130,16 +123,9 @@ impl PMUConfigurationFrame {
             offset += 4;
         }
 
-        //let fnom = u16::from_be_bytes(bytes[offset..offset + 2].try_into().unwrap());
         let fnom = NominalFrequency::from_hex(&bytes[offset..offset + 2]).unwrap();
         offset += 2;
         let cfgcnt = u16::from_be_bytes(bytes[offset..offset + 2].try_into().unwrap());
-        offset += 2;
-
-        let additional_metadata = match version {
-            Version::V2024 => Some(bytes[offset..].to_vec()), // CFG-3 or extended data
-            _ => None,
-        };
 
         Ok(PMUConfigurationFrame {
             stn,
@@ -166,7 +152,7 @@ impl PMUConfigurationFrame {
     /// # Returns
     ///
     /// A byte vector representing the PMU configuration.
-    pub fn to_hex(&self, version: Version) -> Vec<u8> {
+    pub fn to_hex(&self) -> Vec<u8> {
         let mut result = Vec::new();
         result.extend_from_slice(&self.stn);
 
@@ -340,7 +326,7 @@ impl ConfigurationFrame {
 
         let mut pmu_configs = vec![];
 
-        for i in 0..num_pmu {
+        for _ in 0..num_pmu {
             if offset + 26 > bytes.len() {
                 //return Err("Buffer too short for PMU configuration");
                 return Err(ParseError::InvalidLength {
@@ -373,7 +359,7 @@ impl ConfigurationFrame {
 
             // Now try to parse with the updated understanding of the format
             let pmu_bytes = &bytes[offset..offset + pmu_size];
-            let pmu_config = PMUConfigurationFrame::from_hex(pmu_bytes, prefix.version)?;
+            let pmu_config = PMUConfigurationFrame::from_hex(pmu_bytes)?;
             pmu_configs.push(pmu_config);
 
             offset += pmu_size;
@@ -452,7 +438,7 @@ impl ConfigurationFrame {
 
         // Add each PMU configuration
         for pmu in &self.pmu_configs {
-            result.extend_from_slice(&pmu.to_hex(self.prefix.version));
+            result.extend_from_slice(&pmu.to_hex());
         }
 
         // Data rate

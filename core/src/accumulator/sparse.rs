@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 TCP Socket Data Accumulators
 //!
 //! This module provides accumulators for processing fixed-size IEEE C37.118 synchrophasor
@@ -23,12 +22,6 @@
 //! fixed-size buffers into timeseries variables stored in Arrow buffers. It integrates
 //! with the `phasors` module for phasor data handling and Arrow’s `MutableBuffer` for
 //! efficient output storage, suitable for real-time power system monitoring applications.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
 use crate::ieee_c37_118::phasors::{PhasorType, PhasorValue};
 use arrow::buffer::MutableBuffer;

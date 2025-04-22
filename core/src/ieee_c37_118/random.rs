@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Test Frame Generator
 //!
 //! This module provides utilities for generating random IEEE C37.118 configuration and
@@ -20,19 +19,12 @@
 //! This module is used in testing to create synthetic configuration and data frames,
 //! ensuring compatibility with IEEE C37.118 standards. It integrates with the `common`,
 //! `config`, `data_frame`, `units`, and `utils` modules for frame structures and utilities.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
-#![allow(unused)]
 use super::common::{create_sync, FrameType, PrefixFrame, StatField, Version};
 use super::config::{ConfigurationFrame, PMUConfigurationFrame};
 use super::data_frame::{DataFrame, PMUData};
 use super::units::{AnalogUnits, MeasurementType, NominalFrequency, PhasorUnits};
-use super::utils::calculate_crc;
+use super::utils::{calculate_crc, now_to_hex};
 use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -211,11 +203,6 @@ pub fn random_configuration_frame(
 
     // Define frame type based on version
 
-    //let (sync, cfg_type) = match version {
-    //    Version::V2005 => (0xAA31, 1), // Config1 frame for 2005
-    //    Version::V2011 => (0xAA20, 1), // Config1 frame for 2011
-    //    Version::V2024 => (0xAA50, 3), // Config3 frame for 2024
-    //};
     let sync = create_sync(version, FrameType::Config1);
     // Get current time
     let now = SystemTime::now()
@@ -230,7 +217,7 @@ pub fn random_configuration_frame(
     for i in 0..num_stations {
         println!("Creating PMU config for station {}", i);
         let cfg = create_random_pmu_config(i, is_polar, use_float);
-        let cfg_bytes = cfg.to_hex(version);
+        let cfg_bytes = cfg.to_hex();
 
         println!(
             "Added PMU configuration bytes of length: {}",
@@ -371,12 +358,23 @@ fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
 /// A `DataFrame` with random PMU data, valid frame size, and checksum.
 pub fn random_data_frame(config_frame: &ConfigurationFrame) -> DataFrame {
     // Create prefix frame with current timestamp
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
 
-    let soc = now.as_secs() as u32;
-    let fracsec = ((now.subsec_nanos() as f64) / 1_000_000_000.0 * 16777216.0) as u32;
+    let soc_fracsecs = now_to_hex(config_frame.time_base);
+    // Extract the SOC from the first 4 bytes
+    let soc = u32::from_be_bytes([
+        soc_fracsecs[0],
+        soc_fracsecs[1],
+        soc_fracsecs[2],
+        soc_fracsecs[3],
+    ]);
+
+    // Extract the fracsec from the last 4 bytes
+    let fracsec = u32::from_be_bytes([
+        soc_fracsecs[4],
+        soc_fracsecs[5],
+        soc_fracsecs[6],
+        soc_fracsecs[7],
+    ]);
 
     // Data frame has a different sync word
     let sync = create_sync(config_frame.prefix.version, FrameType::Data);
@@ -441,7 +439,7 @@ mod tests {
         // Test with custom parameters
         let custom_config = random_configuration_frame(Some(10), Some(Version::V2011), Some(true));
 
-        let custom_config_parsed = ConfigurationFrame::from_hex(&custom_config.to_hex()).unwrap();
+        let _custom_config_parsed = ConfigurationFrame::from_hex(&custom_config.to_hex()).unwrap();
         // Verify the frame has the expected number of PMUs
         assert_eq!(custom_config.num_pmu, 10);
 

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Command Frame Utilities
 //!
 //! This module provides functionality for constructing and parsing IEEE C37.118 command
@@ -19,14 +18,6 @@
 //! devices, such as requesting configuration data or enabling/disabling data transmission.
 //! It integrates with the `common` module for shared types and the `utils` module for
 //! CRC calculations.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
-
-#![allow(unused)]
 
 use super::common::{ParseError, PrefixFrame, Version};
 use super::utils::{calculate_crc, validate_checksum};

@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 #[cfg(test)]
 mod unified_tests {
     use crate::ieee_c37_118::commands::{CommandFrame, CommandType};
@@ -124,7 +122,7 @@ mod unified_tests {
         let annmr = 3;
         let dgnmr = 1;
 
-        let pmu_config_result = PMUConfigurationFrame::from_hex(&buffer[offset..], Version::V2011);
+        let pmu_config_result = PMUConfigurationFrame::from_hex(&buffer[offset..]);
 
         assert!(
             pmu_config_result.is_ok(),
@@ -166,15 +164,14 @@ mod unified_tests {
         let offset = 20;
 
         // The PMU configuration section
-        let phnmr = 4;
-        let annmr = 3;
-        let dgnmr = 1;
+        let _phnmr = 4;
+        let _annmr = 3;
+        let _dgnmr = 1;
 
-        let pmu_config =
-            PMUConfigurationFrame::from_hex(&buffer[offset..], Version::V2011).unwrap();
+        let pmu_config = PMUConfigurationFrame::from_hex(&buffer[offset..]).unwrap();
 
         // Convert back to bytes
-        let bytes = pmu_config.to_hex(Version::V2011);
+        let bytes = pmu_config.to_hex();
 
         // We need to determine how much of the original buffer corresponds to this PMU config
         // For this test, we'll check key parts instead of the entire serialized frame

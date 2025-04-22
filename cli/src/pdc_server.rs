@@ -1,4 +1,5 @@
 #![allow(unused)]
+use log::info;
 use std::error::Error;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -9,7 +10,7 @@ use rtpa_core::ieee_c37_118::common::Version;
 use rtpa_core::ieee_c37_118::config::ConfigurationFrame;
 use rtpa_core::ieee_c37_118::data_frame::DataFrame;
 use rtpa_core::ieee_c37_118::random::{random_configuration_frame, random_data_frame};
-use rtpa_core::ieee_c37_118::utils::calculate_crc;
+use rtpa_core::ieee_c37_118::utils::{calculate_crc, now_to_hex};
 
 use std::fs;
 use std::path::Path;
@@ -89,23 +90,12 @@ fn read_test_file(file_name: &str) -> Result<Vec<u8>, Box<dyn Error + Send + Syn
     Ok(bytes)
 }
 
-fn update_frame_timestamp(frame: &mut Vec<u8>) {
-    // Get current time
-    let now = std::time::SystemTime::now();
-    let duration = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or(std::time::Duration::from_secs(0));
-
-    // Extract seconds and fractional seconds
-    let secs = duration.as_secs() as u32;
-    let nanos = duration.subsec_nanos();
-    let fracsec = (nanos as f64 / 1_000_000_000.0 * 16777216.0) as u32; // Convert to 24-bit fraction
+fn update_frame_timestamp(frame: &mut Vec<u8>, time_base: u32) {
+    let time_buf = now_to_hex(time_base);
 
     // Update SOC (seconds) - bytes 6-9
-    frame[6..10].copy_from_slice(&secs.to_be_bytes());
-
-    // Update FRACSEC - bytes 10-13
-    frame[10..14].copy_from_slice(&fracsec.to_be_bytes());
+    // And FRACSEC (fractional seconds) - bytes 10-13
+    frame[6..14].copy_from_slice(&time_buf);
 
     // Calculate and update CRC
     let crc = calculate_crc(&frame[..frame.len() - 2]);
@@ -114,31 +104,38 @@ fn update_frame_timestamp(frame: &mut Vec<u8>) {
 }
 
 async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) -> io::Result<()> {
-    println!("MOCK PDC: Handling client");
+    info!("MOCK PDC: Handling client");
     let mut is_streaming = false;
     let stream_interval = Duration::from_secs_f64(1.0 / config.data_rate);
 
     // Create configuration based on mode
-    let (config_frame_bytes, mut data_frame_bytes) = if let Some(num_pmus) = config.num_pmus {
-        println!("MOCK PDC: Using random mode with {} PMUs", num_pmus);
-        // Create a random configuration frame
-        let config_frame = random_configuration_frame(
-            Some(num_pmus),
-            Some(config.version),
-            Some(config.use_polar),
-        );
+    let (config_frame_bytes, mut data_frame_bytes, config_time_base) =
+        if let Some(num_pmus) = config.num_pmus {
+            info!("MOCK PDC: Using random mode with {} PMUs", num_pmus);
+            // Create a random configuration frame
+            let config_frame = random_configuration_frame(
+                Some(num_pmus),
+                Some(config.version),
+                Some(config.use_polar),
+            );
+            let time_base = config_frame.time_base;
 
-        // We'll create a new data frame each time, but we need the config to reference
-        (config_frame.to_hex(), Vec::new())
-    } else {
-        println!("MOCK PDC: Using fixed test files");
-        // Read test files once at the start
-        let config_data = read_test_file("config_message.bin")
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-        let data_data = read_test_file("data_message.bin")
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-        (config_data, data_data)
-    };
+            // We'll create a new data frame each time, but we need the config to reference
+            (config_frame.to_hex(), Vec::new(), time_base)
+        } else {
+            info!("MOCK PDC: Using fixed test files");
+            // Read test files once at the start
+            let config_data = read_test_file("config_message.bin")
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            let data_data = read_test_file("data_message.bin")
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+
+            // Extract time_base from the config frame
+            let config_frame = ConfigurationFrame::from_hex(&config_data)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            let time_base = config_frame.time_base;
+            (config_data, data_data, time_base)
+        };
 
     // If we're using random mode, parse the config frame for later use with data frames
     let config_frame = if config.num_pmus.is_some() {
@@ -163,7 +160,7 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
                     Ok(n) if n > 0 => {
                         // Parse command frame
                         if let Ok(cmd) = CommandFrame::from_hex(&buf[..n]) {
-                            println!("MOCK PDC: Received command: {}", cmd.command_description());
+                            info!("MOCK PDC: Received command: {}", cmd.command_description());
 
                             // Use command_type to get the enum variant
                             match cmd.command_type() {
@@ -173,35 +170,35 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
                                 },
                                 Some(CommandType::TurnOnTransmission) => {
                                     // Start data transmission
-                                    println!("MOCK PDC: Received command: Start data transmission");
+                                    info!("MOCK PDC: Received command: Start data transmission");
                                     is_streaming = true;
                                 },
                                 Some(CommandType::TurnOffTransmission) => {
                                     // Stop data transmission
-                                    println!("MOCK PDC: Received command: Stop data transmission");
+                                    info!("MOCK PDC: Received command: Stop data transmission");
                                     is_streaming = false;
                                 },
                                 Some(cmd_type) => {
-                                    println!("MOCK PDC: Received unhandled command type: {}", cmd_type);
+                                    info!("MOCK PDC: Received unhandled command type: {}", cmd_type);
                                 },
                                 None => {
-                                    println!("MOCK PDC: Received unknown command: {}", cmd.command);
+                                    info!("MOCK PDC: Received unknown command: {}", cmd.command);
                                 }
                             }
                         } else {
-                            println!("MOCK PDC: Received non-command frame");
+                            info!("MOCK PDC: Received non-command frame");
                         }
                     },
                     Ok(0) => {
-                        println!("MOCK PDC: Client disconnected");
+                        info!("MOCK PDC: Client disconnected");
                         break;
                     },
                     Err(e) => {
-                        println!("MOCK PDC: Error reading from socket: {}", e);
+                        info!("MOCK PDC: Error reading from socket: {}", e);
                         break;
                     },
                     Ok(1_usize..)=>{
-                        println!("MOCK PDC: Internal Error");
+                        info!("MOCK PDC: Internal Error");
                         break;
                     }
                 }
@@ -214,16 +211,17 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
                     let frame_bytes = data_frame.to_hex();
 
                     if let Err(e) = socket.write_all(&frame_bytes).await {
-                        println!("MOCK PDC: Error sending data frame: {}", e);
+                        info!("MOCK PDC: Error sending data frame: {}", e);
                         break;
                     }
                 } else {
                     // Fixed mode: Update timestamp and CRC in data frame
+
                     let mut frame_to_send = data_frame_bytes.clone();
-                    update_frame_timestamp(&mut frame_to_send);
+                    update_frame_timestamp(&mut frame_to_send, config_time_base);
 
                     if let Err(e) = socket.write_all(&frame_to_send).await {
-                        println!("MOCK PDC: Error sending data frame: {}", e);
+                        info!("MOCK PDC: Error sending data frame: {}", e);
                         break;
                     }
                 }
@@ -236,23 +234,17 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
 
 pub async fn run_mock_server(server_config: ServerConfig) -> io::Result<()> {
     let listener = TcpListener::bind(&server_config.address).await?;
-    println!("Mock PDC server listening on {}", server_config.address);
-    println!(
+    info!("Mock PDC server listening on {}", server_config.address);
+    info!(
         "Mock PDC Data rate configured to {} Hz",
         server_config.data_rate
     );
 
     if let Some(num_pmus) = server_config.num_pmus {
-        println!("Mock PDC configured with {} random PMUs", num_pmus);
-        println!(
-            "Using IEEE C37.118-{} format",
-            match server_config.version {
-                Version::V2005 => "2005",
-                Version::V2011 => "2011",
-                Version::V2024 => "2024",
-            }
-        );
-        println!(
+        info!("Mock PDC configured with {} random PMUs", num_pmus);
+        info!("Using {} format", server_config.version);
+
+        info!(
             "Using {} coordinates for phasors",
             if server_config.use_polar {
                 "polar"
@@ -261,15 +253,15 @@ pub async fn run_mock_server(server_config: ServerConfig) -> io::Result<()> {
             }
         );
     } else {
-        println!("Mock PDC using fixed test data files");
+        info!("Mock PDC using fixed test data files");
     }
 
     while let Ok((socket, addr)) = listener.accept().await {
-        println!("MOCK PDC: New client connected: {}", addr);
+        info!("MOCK PDC: New client connected: {}", addr);
         let config = server_config.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_client(socket, config).await {
-                println!("MOCK PDC: Client handler error: {}", e);
+                info!("MOCK PDC: Client handler error: {}", e);
             }
         });
     }

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Measurement Units and Configuration Utilities
 //!
 //! This module provides structures for defining measurement units and configuration
@@ -20,14 +19,7 @@
 //! This module is used in configuration frames to specify how measurement data (e.g.,
 //! phasors, analogs) should be scaled and interpreted. It integrates with the `common`
 //! module for error handling and is used by configuration and data frame parsing logic.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
-#![allow(unused)]
 use super::common::ParseError;
 use serde::{Deserialize, Serialize};
 use std::fmt;

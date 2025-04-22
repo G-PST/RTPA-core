@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Phasor Measurement Utilities
 //!
 //! This module provides structures and utilities for handling IEEE C37.118 phasor
@@ -22,12 +21,6 @@
 //! This module is used to parse, convert, and scale phasor measurements from IEEE C37.118
 //! data frames, ensuring accurate representation of voltage and current. It integrates
 //! with the `common` module for error handling and is used by data frame parsing logic.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
 use super::common::ParseError;
 use std::fmt;

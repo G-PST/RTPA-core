@@ -20,8 +20,6 @@ pyo3 = { version = "0.23.3", features = ["extension-module"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-[dev-dependencies]
-criterion = { workspace = true }
 # How we name the python package
 [package.metadata.maturin]
 name = "rtpa"

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # Synchrophasor Data Processing and PDC Interface
 //!
 //! This crate provides a comprehensive library for processing IEEE C37.118 synchrophasor
@@ -31,17 +30,6 @@
 //! data, streaming from PDC servers, or testing synchrophasor processing logic. It leverages
 //! Arrow for efficient timeseries storage and supports parallel processing for real-time
 //! performance, making it suitable for grid monitoring and analysis.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
-//!
-//! This software was developed under funding from the U.S. Department of Energy.
-//! The United States Government retains certain rights in this software.
-
-// Declare the accumulators module
 
 pub mod accumulator {
     pub mod manager;

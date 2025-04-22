@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 PDC Server Interface
 //!
 //! This module provides `PDCBuffer`, a centralized interface for interacting with a Phasor
@@ -19,12 +18,6 @@
 //! `accumulator::manager` for data processing, `commands` for frame creation, `common` for
 //! shared types, `config` for configuration parsing, `phasors` for phasor handling, and
 //! `utils` for checksum validation, suitable for power system monitoring applications.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;

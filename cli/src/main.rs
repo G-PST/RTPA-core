@@ -5,7 +5,7 @@ mod pdc_buffer_server;
 mod pdc_client;
 mod pdc_server;
 use clap::{Parser, Subcommand};
-//use log::info;
+use log::info;
 use pdc_server::{run_mock_server, Protocol, ServerConfig};
 use tokio::io;
 
@@ -55,8 +55,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    //env_logger::init();
-    //info!("Starting application");
+    env_logger::init();
+    println!("Starting application");
 
     let args = Cli::parse();
 
@@ -116,7 +116,7 @@ async fn main() -> io::Result<()> {
             tokio::signal::ctrl_c()
                 .await
                 .expect("Failed to listen for ctrl+c signal");
-            println!("Shutting down...");
+            info!("Shutting down...");
             buffer_server_handle.abort();
         }
     }

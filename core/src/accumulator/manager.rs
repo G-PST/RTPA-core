@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Accumulator Manager for Timeseries Data
 //!
 //! This module provides an `AccumulatorManager` for orchestrating accumulators to process
@@ -19,12 +18,6 @@
 //! measurements into Arrow record batches for timeseries analysis. It integrates with the
 //! `sparse` module’s accumulators, `phasors` module for phasor handling, and Arrow for
 //! data storage, leveraging parallel processing for efficiency in power system monitoring.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
 use super::sparse::{
     Accumulate, C37118PhasorAccumulator, C37118TimestampAccumulator, F32Accumulator,
@@ -43,7 +36,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const MAX_BUFFER_SIZE: usize = 65 * 1024;
+const MAX_BUFFER_SIZE: usize = u32::MAX as usize;
 const BATCH_SIZE: usize = 120;
 
 /// Configuration for regular accumulators in IEEE C37.118 data processing.

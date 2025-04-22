@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Data Frame Utilities
 //!
 //! This module provides functionality for parsing and constructing IEEE C37.118 data
@@ -20,14 +19,7 @@
 //! a `ConfigurationFrame` to interpret channel formats and sizes. It integrates with the
 //! `common` module for shared types, the `config` module for configuration data, and the
 //! `utils` module for CRC calculations.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
-#![allow(unused)]
 /// Represents a data frame from IEEE C37.118
 use super::common::{ChannelDataType, ParseError, PrefixFrame, StatField};
 use super::config::ConfigurationFrame;

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # IEEE C37.118 Synchrophasor Data Processing
 //!
 //! This crate provides a comprehensive library for parsing, generating, and testing
@@ -31,12 +30,6 @@
 //! data parsers, power system monitoring tools, or test suites. It supports all major
 //! frame types and provides utilities for testing and validation, ensuring compliance
 //! with IEEE C37.118 standards.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
 
 pub mod commands;
 pub mod common;

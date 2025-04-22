@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
 //! # Python Interface for IEEE C37.118 PDC Data Processing
 //!
 //! This module provides a Python interface for interacting with a Phasor Data Concentrator
@@ -19,15 +18,6 @@
 //! analysis. It integrates with the `rtpa_core` crate for core PDC functionality, leveraging
 //! Rust’s performance and Arrow’s data format for interoperability with Python data science
 //! ecosystems.
-//!
-//! ## Copyright and Authorship
-//!
-//! Copyright (c) 2025 Alliance for Sustainable Energy, LLC.
-//! Developed by Micah Webb at the National Renewable Energy Laboratory (NREL).
-//! Licensed under the BSD 3-Clause License. See the `LICENSE` file for details.
-//!
-//! This software was developed under funding from the U.S. Department of Energy.
-//! The United States Government retains certain rights in this software.
 
 use ::rtpa_core::pdc_buffer::PDCBuffer as PDCBufferRust;
 use arrow::pyarrow::ToPyArrow;
