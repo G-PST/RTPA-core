@@ -42,6 +42,24 @@ pub struct CommandFrame {
     pub extended_data: Option<Vec<u8>>, // Optional extended data
     pub chk: u16,                       // CRC-CCITT checksum
 }
+impl std::fmt::Display for CommandFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hex_bytes: String = self
+            .to_hex()
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<String>>()
+            .join(" ");
+
+        write!(
+            f,
+            "Command Frame (ID: {}, Type: {}, Hex: {})",
+            self.prefix.idcode,
+            self.command_description(),
+            hex_bytes
+        )
+    }
+}
 
 /// Enumerates command types for IEEE C37.118 command frames.
 ///
@@ -93,6 +111,7 @@ impl CommandFrame {
         }
 
         // Validate checksum
+        // FIXME this causes a panic.
         validate_checksum(bytes).unwrap();
 
         // Parse prefix frame (first 14 bytes)

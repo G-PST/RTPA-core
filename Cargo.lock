@@ -1621,6 +1621,7 @@ dependencies = [
  "arrow",
  "chrono",
  "criterion",
+ "log",
  "rand",
  "rayon",
  "rtpa_cli",

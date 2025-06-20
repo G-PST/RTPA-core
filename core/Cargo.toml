@@ -18,6 +18,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rand = { workspace = true }
 rayon = "1.10.0"
+log = "0.4.27"
 
 
 [dev-dependencies]
