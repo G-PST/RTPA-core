@@ -91,12 +91,15 @@ pub async fn run_pdc_listener(args: PdcListenerArgs) -> io::Result<()> {
         while !stats_should_stop.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_secs_f64(stats_interval));
             let data_count = stats_data_count.swap(0, Ordering::Relaxed);
-            let config_count = stats_config_count.swap(0, Ordering::Relaxed);
-            let crc_count = stats_crc_count.swap(0, Ordering::Relaxed);
-            let format_count = stats_format_count.swap(0, Ordering::Relaxed);
+            let config_count = stats_config_count.load(Ordering::Relaxed);
+            let crc_count = stats_crc_count.load(Ordering::Relaxed);
+            let format_count = stats_format_count.load(Ordering::Relaxed);
             info!(
-                "Stats - Data Frames: {}, Config Frames: {}, CRC Errors: {}, Format Errors: {}",
-                data_count, config_count, crc_count, format_count
+                "Stats ~ Data Frames: {}/s, Config Frames: {}, CRC Errors: {}, Format Errors: {}",
+                data_count as f64 / stats_interval,
+                config_count,
+                crc_count,
+                format_count
             );
         }
     });
@@ -366,7 +369,10 @@ fn process_buffer(
                 Ok(frame_type) => match frame_type {
                     FrameType::Data => {
                         data_frame_count.fetch_add(1, Ordering::Relaxed);
-                        info!("Received Data Frame (ID: {})", prefix.idcode);
+
+                        if data_frame_count.load(Ordering::Relaxed) == 1 {
+                            info!("Received Data Frame (ID: {})", prefix.idcode);
+                        }
                     }
                     FrameType::Header => {
                         info!("Received Header Frame (ID: {})", prefix.idcode);

@@ -86,6 +86,7 @@ pub fn validate_checksum(buffer: &[u8]) -> Result<(), ParseError> {
     Ok(())
 }
 
+// FIXME could potentially panic if system clock is before UNIX_EPOCH. Unlikely.
 pub fn now_to_hex(time_base: u32) -> [u8; 8] {
     let mut buf = [0u8; 8];
 
