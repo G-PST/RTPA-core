@@ -6,7 +6,9 @@
 //! IEEE C37.118.2-2011 Appendix B.
 
 use super::common::ParseError;
+
 use std::time::SystemTime;
+
 /// Calculates the CRC-CCITT checksum for a given buffer.
 ///
 /// This implementation follows the CRC-CCITT algorithm as specified in
@@ -63,9 +65,20 @@ pub fn validate_checksum(buffer: &[u8]) -> Result<(), ParseError> {
     let frame_crc = u16::from_be_bytes([buffer[buffer.len() - 2], buffer[buffer.len() - 1]]);
 
     if calculated_crc != frame_crc {
+        let hex_str: String = buffer
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<String>>()
+            .join(" ");
+        log::warn!(
+            "CRC Checksum Mismatch: Expected {:04X}, got {:04X}",
+            calculated_crc,
+            frame_crc
+        );
+        log::warn!("Buffer (Hex): {}", hex_str);
         return Err(ParseError::InvalidChecksum {
             message: format!(
-                "CRC Checksum Mismatch: Expected {:04X}, got {:04X}",
+                "CRC Checksum Mismatch: Expected {:04X}, got {:04X} ",
                 calculated_crc, frame_crc
             ),
         });
@@ -73,6 +86,7 @@ pub fn validate_checksum(buffer: &[u8]) -> Result<(), ParseError> {
     Ok(())
 }
 
+// FIXME could potentially panic if system clock is before UNIX_EPOCH. Unlikely.
 pub fn now_to_hex(time_base: u32) -> [u8; 8] {
     let mut buf = [0u8; 8];
 

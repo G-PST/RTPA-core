@@ -3,6 +3,7 @@ mod frame_parser;
 mod frames;
 mod pdc_buffer_server;
 mod pdc_client;
+mod pdc_listener;
 mod pdc_server;
 use clap::{Parser, Subcommand};
 use log::info;
@@ -51,12 +52,34 @@ enum Commands {
         #[arg(long, default_value_t = 120)]
         duration: u16,
     },
+    PdcListener {
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        #[arg(long, default_value_t = 8123)]
+        port: u16,
+        #[arg(long, default_value = "tcp")]
+        protocol: String,
+        #[arg(long, default_value_t = false)]
+        multicast: bool,
+        #[arg(long, default_value_t = 10.0)]
+        timeout: f64,
+        #[arg(long, default_value_t = 5.0)]
+        stats_interval: f64,
+        #[arg(long, default_value_t = false)]
+        request_config: bool,
+        #[arg(long, default_value_t = false)]
+        start_transmission: bool,
+        #[arg(long, default_value_t = 7734)]
+        idcode: u16,
+    },
 }
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    env_logger::init();
+    // Initialize logging early to ensure all log messages are captured
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     println!("Starting application");
+    log::info!("Logging initialized for PMU application");
 
     let args = Cli::parse();
 
@@ -118,6 +141,37 @@ async fn main() -> io::Result<()> {
                 .expect("Failed to listen for ctrl+c signal");
             info!("Shutting down...");
             buffer_server_handle.abort();
+        }
+        Commands::PdcListener {
+            host,
+            port,
+            protocol,
+            multicast,
+            timeout,
+            stats_interval,
+            request_config,
+            start_transmission,
+            idcode,
+        } => {
+            let listener_args = pdc_listener::PdcListenerArgs {
+                host,
+                port,
+                protocol: match protocol.to_lowercase().as_str() {
+                    "udp" => pdc_listener::Protocol::Udp,
+                    _ => pdc_listener::Protocol::Tcp,
+                },
+                multicast,
+                timeout,
+                stats_interval,
+                request_config,
+                start_transmission,
+                idcode,
+            };
+            println!("Starting PDC Listener with arguments: {:?}", listener_args);
+            if let Err(e) = pdc_listener::run_pdc_listener(listener_args).await {
+                println!("PDC listener error: {}", e);
+                log::error!("PDC listener error: {}", e);
+            }
         }
     }
     Ok(())

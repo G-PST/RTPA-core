@@ -1,12 +1,12 @@
 #![allow(unused)]
-use log::info;
+use log::{error, info};
 use std::error::Error;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::{self, Duration};
 
 use rtpa_core::ieee_c37_118::commands::{CommandFrame, CommandType};
-use rtpa_core::ieee_c37_118::common::Version;
+use rtpa_core::ieee_c37_118::common::{PrefixFrame, Version};
 use rtpa_core::ieee_c37_118::config::ConfigurationFrame;
 use rtpa_core::ieee_c37_118::data_frame::DataFrame;
 use rtpa_core::ieee_c37_118::random::{random_configuration_frame, random_data_frame};
@@ -152,41 +152,90 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
 
     // Buffer for reading commands
     let mut buf = vec![0u8; 1024];
+    let mut accumulated_buffer: Vec<u8> = Vec::new();
+    let mut buffer_pos: usize = 0;
 
     loop {
         tokio::select! {
             read_result = socket.read(&mut buf) => {
                 match read_result {
-                    Ok(n) if n > 0 => {
-                        // Parse command frame
-                        if let Ok(cmd) = CommandFrame::from_hex(&buf[..n]) {
-                            info!("MOCK PDC: Received command: {}", cmd.command_description());
 
-                            // Use command_type to get the enum variant
-                            match cmd.command_type() {
-                                Some(CommandType::SendConfigFrame2) | Some(CommandType::SendConfigFrame1) => {
-                                    // Send config frame
-                                    socket.write_all(&config_frame_bytes).await?;
+                    Ok(n) if n > 0 => {
+                        // Append new data to accumulated buffer
+                        if n < 14 {
+                            info!("MOCK PDC: Warning: Read {} bytes, less than minimum 14 bytes for IEEE C37.118 frame, discarding data", n);
+                            continue; // Skip appending and processing small data
+                        }
+                        // Append new data to accumulated buffer
+                        accumulated_buffer.extend_from_slice(&buf[..n]);
+                        info!("MOCK PDC: Read {} bytes, total buffer size: {}, current position: {}", n, accumulated_buffer.len(), buffer_pos);
+                        // Process buffer iteratively from current position
+                        while buffer_pos < accumulated_buffer.len() {
+                            // Try to parse the prefix frame starting at buffer_pos
+                            let remaining_data = &accumulated_buffer[buffer_pos..];
+                            match PrefixFrame::from_hex(remaining_data) {
+                                Ok(prefix) => {
+                                    let frame_size = prefix.framesize as usize;
+                                    if buffer_pos + frame_size <= accumulated_buffer.len() {
+                                        // We have a complete frame, extract it
+                                        let frame_data = &accumulated_buffer[buffer_pos..buffer_pos + frame_size];
+                                        // Parse the frame as a command
+                                        if let Ok(cmd) = CommandFrame::from_hex(frame_data) {
+                                            info!("MOCK PDC: Received command: {}", cmd.command_description());
+
+                                            // Handle the command
+                                            match cmd.command_type() {
+                                                Some(CommandType::SendConfigFrame2) | Some(CommandType::SendConfigFrame1) => {
+                                                    // Send config frame
+                                                    socket.write_all(&config_frame_bytes).await?;
+                                                },
+                                                Some(CommandType::TurnOnTransmission) => {
+                                                    // Start data transmission
+                                                    info!("MOCK PDC: Received command: Start data transmission");
+                                                    is_streaming = true;
+                                                },
+                                                Some(CommandType::TurnOffTransmission) => {
+                                                    // Stop data transmission
+                                                    info!("MOCK PDC: Received command: Stop data transmission");
+                                                    is_streaming = false;
+                                                },
+                                                Some(cmd_type) => {
+                                                    info!("MOCK PDC: Received unhandled command type: {}", cmd_type);
+                                                },
+                                                None => {
+                                                    info!("MOCK PDC: Received unknown command: {}", cmd.command);
+                                                }
+                                            }
+                                        } else {
+                                            info!("MOCK PDC: Failed to parse command frame from slice of size {}", frame_size);
+                                        }
+                                        // Update position to after the processed frame
+                                        buffer_pos += frame_size;
+                                        info!("MOCK PDC: Processed frame of size {}, new position: {}", frame_size, buffer_pos);
+                                    } else {
+                                        // Frame is incomplete, wait for more data
+                                        info!("MOCK PDC: Incomplete frame, expected size {}, but buffer ends at {}, waiting for more data", frame_size, accumulated_buffer.len());
+                                        break;
+                                    }
                                 },
-                                Some(CommandType::TurnOnTransmission) => {
-                                    // Start data transmission
-                                    info!("MOCK PDC: Received command: Start data transmission");
-                                    is_streaming = true;
-                                },
-                                Some(CommandType::TurnOffTransmission) => {
-                                    // Stop data transmission
-                                    info!("MOCK PDC: Received command: Stop data transmission");
-                                    is_streaming = false;
-                                },
-                                Some(cmd_type) => {
-                                    info!("MOCK PDC: Received unhandled command type: {}", cmd_type);
-                                },
-                                None => {
-                                    info!("MOCK PDC: Received unknown command: {}", cmd.command);
+                                Err(e) => {
+                                    // Couldn't parse prefix, might be incomplete or invalid
+                                    info!("MOCK PDC: Failed to parse prefix frame starting at position {}: {}. Buffer might be incomplete or invalid.", buffer_pos, e);
+                                    break;
                                 }
                             }
-                        } else {
-                            info!("MOCK PDC: Received non-command frame");
+                        }
+
+                        // If we've processed a lot and buffer_pos is far ahead, shift data to start to save memory
+                        if buffer_pos > 0 && buffer_pos >= accumulated_buffer.len() / 2 {
+                            if buffer_pos < accumulated_buffer.len() {
+                                let remaining_data = accumulated_buffer[buffer_pos..].to_vec();
+                                accumulated_buffer = remaining_data;
+                            } else {
+                                accumulated_buffer.clear();
+                            }
+                            buffer_pos = 0;
+                            info!("MOCK PDC: Shifted buffer, new size: {}, new position: {}", accumulated_buffer.len(), buffer_pos);
                         }
                     },
                     Ok(0) => {
@@ -216,7 +265,6 @@ async fn handle_client(mut socket: tokio::net::TcpStream, config: ServerConfig) 
                     }
                 } else {
                     // Fixed mode: Update timestamp and CRC in data frame
-
                     let mut frame_to_send = data_frame_bytes.clone();
                     update_frame_timestamp(&mut frame_to_send, config_time_base);
 
