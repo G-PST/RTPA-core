@@ -121,6 +121,57 @@ pub fn timestamp_from_hex(hex: &[u8], time_base: u32) -> i64 {
     timestamp
 }
 
+/// Finds the starting indices and potential completeness of frames in a buffer by locating sync bytes (0xAA).
+///
+/// IEEE C37.118 frames start with a sync byte of 0xAA. This function scans the input buffer
+/// for occurrences of this sync byte followed by a valid frame type byte and returns the indices
+/// where potential frames start along with whether the frame appears complete based on the frame size.
+/// This is useful for splitting a buffer that may contain multiple frames and handling partial frames.
+///
+/// # Parameters
+///
+/// * `buffer`: The input byte slice to search for frame start indices.
+///
+/// # Returns
+///
+/// * `Ok(Vec<(usize, bool)>)` containing tuples of (start_index, is_complete) where start_index is the
+///   position of the frame start, and is_complete indicates if the frame size matches the available data.
+/// * `Err(ParseError::InvalidData)` if no valid sync bytes are found or subsequent bytes are invalid.
+pub fn find_frame_starts(buffer: &[u8]) -> Result<Vec<(usize, bool)>, ParseError> {
+    let mut frame_info = Vec::new();
+
+    for i in 0..buffer.len() {
+        // Check for sync byte 0xAA
+        if buffer[i] == 0xAA {
+            // Check if there's at least one more byte after sync to validate frame type
+            if i + 1 < buffer.len() {
+                // Basic check if next byte could be a valid frame type (0x01 to 0x05 usually)
+                let next_byte = buffer[i + 1];
+                if next_byte >= 0x01 && next_byte <= 0x05 {
+                    // Check if we have enough bytes to read frame size (bytes 2 and 3)
+                    if i + 3 < buffer.len() {
+                        let frame_size =
+                            u16::from_be_bytes([buffer[i + 2], buffer[i + 3]]) as usize;
+                        let is_complete = i + frame_size <= buffer.len();
+                        frame_info.push((i, is_complete));
+                    } else {
+                        // Not enough data to read frame size, consider it incomplete
+                        frame_info.push((i, false));
+                    }
+                }
+            }
+        }
+    }
+
+    if frame_info.is_empty() {
+        return Err(ParseError::InvalidFormat {
+            message: "No valid frame sync bytes found in buffer".to_string(),
+        });
+    }
+
+    Ok(frame_info)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,5 +348,37 @@ mod tests {
                 expected_micros
             );
         }
+    }
+    #[test]
+    fn test_find_frame_starts() {
+        // Test a buffer with multiple frames starting with 0xAA sync byte
+        let buffer = vec![
+            0xAA, 0x01, 0x00, 0x0C, // First frame start, size 12 (complete)
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0xAA, 0x02, 0x00,
+            0x0C, // Second frame start, size 12 (complete)
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0xAA, 0x03, 0x00,
+            0x0C, // Third frame start, size 12 (incomplete)
+            0x00, 0x01, 0x02, 0x03,
+        ];
+
+        let result = find_frame_starts(&buffer).unwrap();
+        assert_eq!(
+            result,
+            vec![(0, true), (12, true), (24, false)],
+            "Should find frame start indices and completeness correctly"
+        );
+
+        // Test empty buffer
+        let empty_buffer = vec![];
+        let empty_result = find_frame_starts(&empty_buffer);
+        assert!(empty_result.is_err(), "Empty buffer should return error");
+
+        // Test buffer with no sync bytes
+        let no_sync_buffer = vec![0x01, 0x02, 0x03, 0x04];
+        let no_sync_result = find_frame_starts(&no_sync_buffer);
+        assert!(
+            no_sync_result.is_err(),
+            "Buffer with no sync bytes should return error"
+        );
     }
 }
