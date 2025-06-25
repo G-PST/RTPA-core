@@ -158,13 +158,7 @@ impl AccumulatorManager {
     fn sanitize_column_name(name: &str) -> String {
         let sanitized = name
             .chars()
-            .filter(|c| {
-                if *c == '\x00' || !c.is_ascii_graphic() {
-                    false
-                } else {
-                    true
-                }
-            })
+            .filter(|c| *c != '\x00') // Explicitly remove null bytes
             .map(|c| {
                 if c.is_alphanumeric() || c == '_' {
                     c
@@ -1297,7 +1291,7 @@ mod tests {
         assert_eq!(AccumulatorManager::sanitize_column_name("TEST#1"), "TEST_1");
         assert_eq!(
             AccumulatorManager::sanitize_column_name("TEST\nNEW"),
-            "TESTNEW"
+            "TEST_NEW"
         );
         assert_eq!(
             AccumulatorManager::sanitize_column_name("Normal_Name"),
