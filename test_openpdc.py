@@ -33,6 +33,7 @@ import pandas as pd
 import polars as pl
 from time import sleep, time
 import binascii  # For hex conversion
+from datetime import datetime
 
 # Set up argument parser for host and port
 parser = argparse.ArgumentParser(description="Connect to a PDC server and process synchrophasor data.")
@@ -50,11 +51,11 @@ pdc_buffer.connect(args.host, args.port, 235, version="v1", output_format=None)
 # Start streaming synchrophasor data from the PDC server
 pdc_buffer.start_stream()
 
-print("Stream started, waiting for buffer to fill")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Stream started, waiting for buffer to fill")
 # Wait 15 seconds to allow the buffer to accumulate data
 sleep(15)
 
-print("requesting data")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Requesting data")
 # Measure time to retrieve the RecordBatch
 t1 = time()
 record_batch = pdc_buffer.get_data()
@@ -72,22 +73,23 @@ t4 = time()
 dfpl = pl.from_arrow(record_batch)
 t5 = time()
 
-print("Data received")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Data received")
 # Print performance metrics for data retrieval and conversions
-print(f"Time taken to produce record batch: {(t2-t1)*1000:.1f} milliseconds")
-print(f"Time taken to convert to pandas DataFrame: {(t3-t2)*1000:.1f} milliseconds")
-print(f"Time taken to convert to datetime: {(t4-t3)*1000:.1f} milliseconds")
-print(f"Time taken to convert to polars: {(t5-t4)*1000:.1f} milliseconds")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Time taken to produce record batch: {(t2-t1)*1000:.1f} milliseconds")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Time taken to convert to pandas DataFrame: {(t3-t2)*1000:.1f} milliseconds")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Time taken to convert to datetime: {(t4-t3)*1000:.1f} milliseconds")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Time taken to convert to polars: {(t5-t4)*1000:.1f} milliseconds")
 
 # ... (rest of the script remains the same for data processing and output)
 # Calculate and print the memory usage of the Pandas DataFrame
 size_in_bytes = df.memory_usage(deep=True).sum()
 size_in_mb = size_in_bytes / (1024 * 1024)
-print(f"Size in MB: {size_in_mb:.2f}")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Size in MB: {size_in_mb:.2f}")
 
-print("Number of rows")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Number of rows")
 # Print the number of rows in the DataFrame
-print(f"Num rows: {len(df)}")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Num rows: {len(df)}")
 
 # ... (rest of the script for further processing and closing connection remains unchanged)
 pdc_buffer.stop_stream()
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] Stream stopped")
