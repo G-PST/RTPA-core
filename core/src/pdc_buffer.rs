@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use arrow::record_batch::RecordBatch;
+use log::{debug, error};
 
 use crate::accumulator::manager::{AccumulatorConfig, AccumulatorManager};
 
@@ -275,8 +276,6 @@ impl PDCBuffer {
             *tx_guard = Some(buffer_request_tx);
         }
 
-        let data_frame_size = self._data_frame_size;
-
         let producer = {
             let mut stream = stream.try_clone().unwrap();
             thread::spawn(move || {
@@ -285,9 +284,13 @@ impl PDCBuffer {
                     return;
                 }
 
-                let mut peek_buffer = [0u8; 4];
-                // TODO we should know the size of this frame after reading the configuration.
-                let mut current_frame_buffer = vec![0u8; data_frame_size];
+                use crate::ieee_c37_118::common::FrameType;
+                use crate::ieee_c37_118::utils::find_frame_starts;
+
+                // Use a larger buffer to potentially read multiple frames at once
+                let mut read_buffer = vec![0u8; 8192]; // 8KB buffer for reading TCP stream
+                let mut leftover_buffer = Vec::new(); // Store partial frames for next iteration
+                let mut current_frame_buffer = Vec::new();
 
                 loop {
                     if let Ok(response_tx) = buffer_request_rx.try_recv() {
@@ -300,45 +303,97 @@ impl PDCBuffer {
                         break;
                     }
 
-                    // Read SYNC and frame size (4 bytes)
-                    match stream.read_exact(&mut peek_buffer) {
-                        Ok(()) => {
-                            let frame_size =
-                                u16::from_be_bytes([peek_buffer[2], peek_buffer[3]]) as usize;
-                            if frame_size != data_frame_size {
-                                println!(
-                                    "Unexpected frame size: {}. Expected {}",
-                                    frame_size, data_frame_size
-                                );
-                                continue;
-                            }
+                    // Read data from the stream into the read buffer
+                    match stream.read(&mut read_buffer) {
+                        Ok(bytes_read) if bytes_read > 0 => {
+                            // Combine leftover from previous read with new data
+                            let mut combined_buffer = leftover_buffer.clone();
+                            combined_buffer.extend_from_slice(&read_buffer[..bytes_read]);
+                            leftover_buffer.clear();
 
-                            // Read the rest of the frame
-                            current_frame_buffer = vec![0u8; frame_size];
-                            current_frame_buffer[..4].copy_from_slice(&peek_buffer); // Include SYNC and size
+                            // Find frame starts in the combined buffer
+                            match find_frame_starts(&combined_buffer) {
+                                Ok(frame_starts) => {
+                                    let mut last_processed = 0;
+                                    for (start_idx, is_complete) in frame_starts {
+                                        if !is_complete {
+                                            // Save partial frame as leftover
+                                            leftover_buffer
+                                                .extend_from_slice(&combined_buffer[start_idx..]);
+                                            continue;
+                                        }
 
-                            if frame_size > 4 {
-                                match stream.read_exact(&mut current_frame_buffer[4..]) {
-                                    Ok(()) => {
-                                        if tx.send(current_frame_buffer.clone()).is_err() {
-                                            println!("Consumer disconnected");
-                                            break;
+                                        // Extract frame size from bytes 2 and 3
+                                        let frame_size = u16::from_be_bytes([
+                                            combined_buffer[start_idx + 2],
+                                            combined_buffer[start_idx + 3],
+                                        ])
+                                            as usize;
+
+                                        // Extract the complete frame
+                                        let end_idx = start_idx + frame_size;
+                                        if end_idx <= combined_buffer.len() {
+                                            let frame = &combined_buffer[start_idx..end_idx];
+
+                                            // Check if this is a data frame using FrameType
+
+                                            if frame.len() > 1 {
+                                                let sync: u16 =
+                                                    u16::from_be_bytes([frame[0], frame[1]]);
+                                                let frame_type = FrameType::from_sync(sync);
+
+                                                match frame_type {
+                                                    Ok(FrameType::Data) => {
+                                                        // Process data frame
+                                                        // Only send data frames to consumer
+                                                        if tx.send(frame.to_vec()).is_err() {
+                                                            println!("Consumer disconnected");
+                                                            break;
+                                                        }
+                                                        current_frame_buffer = frame.to_vec();
+                                                    }
+                                                    Err(_) => {
+                                                        // Handle invalid frame type
+                                                        // Log error
+                                                        error!(
+                                                            "Error parsing frame type: {:?}",
+                                                            frame_type.err(),
+                                                        );
+                                                    }
+                                                    _ => {
+                                                        debug!(
+                                                            "Ignoring Non-Data Frame: {}",
+                                                            frame_type.unwrap()
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            last_processed = end_idx;
                                         }
                                     }
-                                    Err(e) => {
-                                        println!("Stream read error: {}", e);
-                                        break;
+                                    // Save any remaining data after the last processed frame as leftover
+                                    if last_processed < combined_buffer.len() {
+                                        leftover_buffer
+                                            .extend_from_slice(&combined_buffer[last_processed..]);
                                     }
                                 }
-                            } else {
-                                if tx.send(current_frame_buffer.clone()).is_err() {
-                                    println!("Consumer disconnected");
-                                    break;
+                                Err(e) => {
+                                    println!("Error finding frame starts: {}", e);
+                                    // If we can't parse frames, treat all as leftover to prevent data loss
+                                    leftover_buffer = combined_buffer;
                                 }
                             }
                         }
+                        Ok(0) => {
+                            println!("Stream closed by remote end");
+                            break;
+                        }
                         Err(e) => {
                             println!("Stream read error: {}", e);
+                            break;
+                        }
+                        Ok(_) => {
+                            println!("Unexpected read result");
                             break;
                         }
                     }
