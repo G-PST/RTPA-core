@@ -41,7 +41,7 @@ use crate::utils::config_to_accumulators;
 const DEFAULT_STANDARD: Version = Version::V2011;
 const DEFAULT_MAX_BATCHES: usize = 120; // ~4 minutes at 60hz
 const DEFAULT_BATCH_SIZE: usize = 128; // ~2 seconds of data at 60hz
-const DEFAULT_TIMEOUT: u64 = 5; // 5 seconds timeout
+const DEFAULT_TIMEOUT: u64 = 30; // Default timeout of 30 seconds
 
 /// Interface for interacting with a PDC server over TCP for IEEE C37.118 data.
 ///
@@ -118,6 +118,7 @@ impl PDCBuffer {
         batch_size: Option<usize>,
         max_batches: Option<usize>,
         output_phasor_type: Option<PhasorType>,
+        timeout_secs: Option<u64>,
     ) -> Self {
         // try to connect to the tcp socket.
         //
@@ -133,11 +134,12 @@ impl PDCBuffer {
         let mut stream = TcpStream::connect(format!("{}:{}", ip_addr, port)).unwrap();
 
         // Set read and write timeouts
+        let timeout = timeout_secs.unwrap_or(DEFAULT_TIMEOUT);
         stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(DEFAULT_TIMEOUT)))
+            .set_read_timeout(Some(std::time::Duration::from_secs(timeout)))
             .unwrap();
         stream
-            .set_write_timeout(Some(std::time::Duration::from_secs(DEFAULT_TIMEOUT)))
+            .set_write_timeout(Some(std::time::Duration::from_secs(timeout)))
             .unwrap();
 
         // default to the 2011 standard.
@@ -344,8 +346,6 @@ impl PDCBuffer {
 
                                                 match frame_type {
                                                     Ok(FrameType::Data) => {
-                                                        // Process data frame
-                                                        // Only send data frames to consumer
                                                         if tx.send(frame.to_vec()).is_err() {
                                                             println!("Consumer disconnected");
                                                             break;

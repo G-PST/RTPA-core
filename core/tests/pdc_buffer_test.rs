@@ -58,6 +58,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
 
         // Start the stream
@@ -156,6 +157,7 @@ mod tests {
             4713,
             123, // ID code that matches the mock server
             Some(Version::V2011),
+            None,
             None,
             None,
             None,

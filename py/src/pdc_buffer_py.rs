@@ -68,6 +68,8 @@ impl PDCBuffer {
     ///     batch_size (int, optional): The size of data batches. Defaults to None.
     ///     max_batches (int, optional): The maximum number of batches to store.
     ///         Defaults to None.
+    ///     timeout_secs (int, optional): The timeout in seconds for network operations.
+    ///         Defaults to None, which uses the default timeout (30 seconds).
     ///
     /// Raises:
     ///     ValueError: If the version or output_format is invalid.
@@ -76,8 +78,8 @@ impl PDCBuffer {
     /// Returns:
     ///     None
     #[pyo3(
-        text_signature = "(ip_addr, port, id_code, version=None, output_format=None, batch_size=None, max_batches=None)",
-        signature=(ip_addr, port, id_code, version = None, output_format = None, batch_size = None, max_batches = None))]
+        text_signature = "(ip_addr, port, id_code, version=None, output_format=None, batch_size=None, max_batches=None, timeout_secs=None)",
+        signature=(ip_addr, port, id_code, version = None, output_format = None, batch_size = None, max_batches = None, timeout_secs = None))]
     fn connect(
         &mut self,
         ip_addr: String,
@@ -87,6 +89,7 @@ impl PDCBuffer {
         output_format: Option<String>,
         batch_size: Option<usize>,
         max_batches: Option<usize>,
+        timeout_secs: Option<u64>,
     ) -> PyResult<()> {
         // Convert version string to Version enum if provided
         let version_enum = match version {
@@ -125,6 +128,7 @@ impl PDCBuffer {
             batch_size,
             max_batches,
             phasor_type_enum,
+            timeout_secs,
         ));
         Ok(())
     }
