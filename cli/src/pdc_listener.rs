@@ -206,6 +206,7 @@ async fn run_tcp_listener(
     }
 
     let mut buffer = vec![0; 65535];
+    let mut leftover = Vec::new();
     let timeout_duration = Duration::from_secs_f64(timeout_secs);
     let mut last_data_time = Instant::now();
 
@@ -218,13 +219,44 @@ async fn run_tcp_listener(
         match timeout(timeout_duration, stream.read(&mut buffer)).await {
             Ok(Ok(bytes_read)) if bytes_read > 0 => {
                 last_data_time = Instant::now();
-                process_buffer(
-                    &buffer[..bytes_read],
-                    &data_frame_count,
-                    &config_frame_count,
-                    &crc_error_count,
-                    &format_error_count,
-                );
+                let mut processing_buffer = leftover.clone();
+                processing_buffer.extend_from_slice(&buffer[..bytes_read]);
+                leftover.clear();
+
+                match rtpa_core::ieee_c37_118::utils::find_frame_starts(&processing_buffer) {
+                    Ok(frame_info) => {
+                        let mut last_end = 0;
+                        for (start, is_complete) in frame_info {
+                            if is_complete {
+                                let frame_size = u16::from_be_bytes([
+                                    processing_buffer[start + 2],
+                                    processing_buffer[start + 3],
+                                ]) as usize;
+                                let end = start + frame_size;
+                                if end <= processing_buffer.len() {
+                                    let frame_buffer = &processing_buffer[start..end];
+                                    process_single_frame(
+                                        frame_buffer,
+                                        &data_frame_count,
+                                        &config_frame_count,
+                                        &crc_error_count,
+                                        &format_error_count,
+                                    );
+                                    last_end = end;
+                                }
+                            }
+                        }
+                        // Keep any unprocessed data as leftover for the next read
+                        if last_end < processing_buffer.len() {
+                            leftover.extend_from_slice(&processing_buffer[last_end..]);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to find frame starts: {:?}", e);
+                        // Keep the entire buffer as leftover if we can't process it
+                        leftover.extend_from_slice(&processing_buffer);
+                    }
+                }
             }
             Ok(Ok(_)) => {
                 warn!("Connection closed by remote host");
@@ -299,6 +331,7 @@ async fn run_udp_listener(
     }
 
     let mut buffer = vec![0; 65535];
+    let mut leftover = Vec::new();
     let timeout_duration = Duration::from_secs_f64(timeout_secs);
     let mut last_data_time = Instant::now();
 
@@ -311,13 +344,44 @@ async fn run_udp_listener(
         match socket.recv_from(&mut buffer) {
             Ok((bytes_read, _addr)) if bytes_read > 0 => {
                 last_data_time = Instant::now();
-                process_buffer(
-                    &buffer[..bytes_read],
-                    &data_frame_count,
-                    &config_frame_count,
-                    &crc_error_count,
-                    &format_error_count,
-                );
+                let mut processing_buffer = leftover.clone();
+                processing_buffer.extend_from_slice(&buffer[..bytes_read]);
+                leftover.clear();
+
+                match rtpa_core::ieee_c37_118::utils::find_frame_starts(&processing_buffer) {
+                    Ok(frame_info) => {
+                        let mut last_end = 0;
+                        for (start, is_complete) in frame_info {
+                            if is_complete {
+                                let frame_size = u16::from_be_bytes([
+                                    processing_buffer[start + 2],
+                                    processing_buffer[start + 3],
+                                ]) as usize;
+                                let end = start + frame_size;
+                                if end <= processing_buffer.len() {
+                                    let frame_buffer = &processing_buffer[start..end];
+                                    process_single_frame(
+                                        frame_buffer,
+                                        &data_frame_count,
+                                        &config_frame_count,
+                                        &crc_error_count,
+                                        &format_error_count,
+                                    );
+                                    last_end = end;
+                                }
+                            }
+                        }
+                        // Keep any unprocessed data as leftover for the next read
+                        if last_end < processing_buffer.len() {
+                            leftover.extend_from_slice(&processing_buffer[last_end..]);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to find frame starts: {:?}", e);
+                        // Keep the entire buffer as leftover if we can't process it
+                        leftover.extend_from_slice(&processing_buffer);
+                    }
+                }
             }
             Ok(_) => {
                 warn!("Received empty packet");
@@ -341,7 +405,7 @@ async fn run_udp_listener(
     Ok(())
 }
 
-fn process_buffer(
+fn process_single_frame(
     buffer: &[u8],
     data_frame_count: &AtomicUsize,
     config_frame_count: &AtomicUsize,
