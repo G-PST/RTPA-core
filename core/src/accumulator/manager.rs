@@ -30,12 +30,12 @@ use arrow::array::{
 use arrow::buffer::{Buffer, MutableBuffer};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
+use log::{debug, error};
 use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-
 const MAX_BUFFER_SIZE: usize = u32::MAX as usize;
 const BATCH_SIZE: usize = 120;
 
@@ -146,6 +146,39 @@ impl AccumulatorManager {
         )
     }
 
+    /// Sanitizes a column name by removing null bytes and non-printable characters.
+    ///
+    /// # Parameters
+    ///
+    /// * `name`: The original column name.
+    ///
+    /// # Returns
+    ///
+    /// A sanitized string suitable for use as a column name in Arrow schema.
+    fn sanitize_column_name(name: &str) -> String {
+        let sanitized = name
+            .chars()
+            .filter(|c| {
+                if *c == '\x00' || !c.is_ascii_graphic() {
+                    false
+                } else {
+                    true
+                }
+            })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        if sanitized != name {
+            debug!("Sanitized column name from '{:?}' to '{}'", name, sanitized);
+        }
+        sanitized
+    }
+
     /// Creates a new manager with custom buffer and batch sizes.
     ///
     /// # Parameters
@@ -214,24 +247,27 @@ impl AccumulatorManager {
 
         // Add fields for regular accumulators
         for config in &valid_configs {
-            fields.push(Field::new(&config.name, config.var_type.clone(), false));
+            let sanitized_name = Self::sanitize_column_name(&config.name);
+            fields.push(Field::new(sanitized_name, config.var_type.clone(), false));
         }
 
         // Add fields for phasor components
         for config in &valid_phasor_configs {
+            let sanitized_name_real = Self::sanitize_column_name(&config.name_real);
+            let sanitized_name_imag = Self::sanitize_column_name(&config.name_imag);
             // Add fields based on output type
             match config.output_type {
                 PhasorType::FloatRect | PhasorType::FloatPolar => {
-                    fields.push(Field::new(&config.name_real, DataType::Float32, false));
-                    fields.push(Field::new(&config.name_imag, DataType::Float32, false));
+                    fields.push(Field::new(sanitized_name_real, DataType::Float32, false));
+                    fields.push(Field::new(sanitized_name_imag, DataType::Float32, false));
                 }
                 PhasorType::IntRect => {
-                    fields.push(Field::new(&config.name_real, DataType::Int16, false));
-                    fields.push(Field::new(&config.name_imag, DataType::Int16, false));
+                    fields.push(Field::new(sanitized_name_real, DataType::Int16, false));
+                    fields.push(Field::new(sanitized_name_imag, DataType::Int16, false));
                 }
                 PhasorType::IntPolar => {
-                    fields.push(Field::new(&config.name_real, DataType::UInt16, false));
-                    fields.push(Field::new(&config.name_imag, DataType::Int16, false));
+                    fields.push(Field::new(sanitized_name_real, DataType::UInt16, false));
+                    fields.push(Field::new(sanitized_name_imag, DataType::Int16, false));
                 }
             }
         }
@@ -426,7 +462,8 @@ impl AccumulatorManager {
     /// Saves the current batch to the records queue.
     ///
     /// Creates a record batch from the output buffers, adds a timestamp, and stores it in the
-    /// records queue, clearing the buffers afterward.
+    /// records queue, clearing the buffers afterward. Handles errors for specific columns
+    /// by logging them and continuing with the remaining data.
     fn save_batch(&self) {
         let has_data = self.output_buffers.iter().any(|buffer| {
             let buffer = buffer.lock().unwrap();
@@ -437,94 +474,112 @@ impl AccumulatorManager {
             return;
         }
 
-        // Create arrays from buffers
-        let arrays: Vec<ArrayRef> = self
-            .output_buffers
-            .iter()
-            .enumerate()
-            .map(|(idx, buffer_arc)| {
-                let buffer = buffer_arc.lock().unwrap();
-                let data_buffer = Buffer::from(buffer.as_slice());
+        // Create arrays from buffers with error handling for individual columns
+        let mut arrays: Vec<ArrayRef> = Vec::new();
+        let mut valid_fields: Vec<Field> = Vec::new();
+        let mut dropped_columns: Vec<String> = Vec::new();
 
-                // Get the field data type from the schema
-                let data_type = self.schema.field(idx).data_type();
+        for (idx, buffer_arc) in self.output_buffers.iter().enumerate() {
+            let field = self.schema.field(idx);
+            let data_type = field.data_type();
+            let column_name = field.name();
+            let buffer = buffer_arc.lock().unwrap();
+            let data_buffer = Buffer::from(buffer.as_slice());
 
-                match data_type {
-                    DataType::Float32 => {
-                        let num_values = data_buffer.len() / std::mem::size_of::<f32>();
-                        let values = unsafe {
-                            std::slice::from_raw_parts(
-                                data_buffer.as_ptr() as *const f32,
-                                num_values,
-                            )
-                        };
-                        Arc::new(Float32Array::from(values.to_vec())) as ArrayRef
-                    }
-                    DataType::Int32 => {
-                        let num_values = data_buffer.len() / std::mem::size_of::<i32>();
-                        let values = unsafe {
-                            std::slice::from_raw_parts(
-                                data_buffer.as_ptr() as *const i32,
-                                num_values,
-                            )
-                        };
-                        Arc::new(Int32Array::from(values.to_vec())) as ArrayRef
-                    }
-                    DataType::UInt16 => {
-                        let num_values = data_buffer.len() / std::mem::size_of::<u16>();
-                        let values = unsafe {
-                            std::slice::from_raw_parts(
-                                data_buffer.as_ptr() as *const u16,
-                                num_values,
-                            )
-                        };
-                        Arc::new(UInt16Array::from(values.to_vec())) as ArrayRef
-                    }
-                    DataType::Int16 => {
-                        let num_values = data_buffer.len() / std::mem::size_of::<i16>();
-                        let values = unsafe {
-                            std::slice::from_raw_parts(
-                                data_buffer.as_ptr() as *const i16,
-                                num_values,
-                            )
-                        };
-                        Arc::new(Int16Array::from(values.to_vec())) as ArrayRef
-                    }
-                    DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-                        let num_values = data_buffer.len() / std::mem::size_of::<i64>();
-                        let values = unsafe {
-                            std::slice::from_raw_parts(
-                                data_buffer.as_ptr() as *const i64,
-                                num_values,
-                            )
-                        };
-                        Arc::new(TimestampNanosecondArray::from(values.to_vec())) as ArrayRef
-                    }
-                    _ => panic!("Unsupported data type: {:?}", data_type),
+            let result = match data_type {
+                DataType::Float32 => {
+                    let num_values = data_buffer.len() / std::mem::size_of::<f32>();
+                    let values = unsafe {
+                        std::slice::from_raw_parts(data_buffer.as_ptr() as *const f32, num_values)
+                    };
+                    Ok(Arc::new(Float32Array::from(values.to_vec())) as ArrayRef)
                 }
-            })
-            .collect();
+                DataType::Int32 => {
+                    let num_values = data_buffer.len() / std::mem::size_of::<i32>();
+                    let values = unsafe {
+                        std::slice::from_raw_parts(data_buffer.as_ptr() as *const i32, num_values)
+                    };
+                    Ok(Arc::new(Int32Array::from(values.to_vec())) as ArrayRef)
+                }
+                DataType::UInt16 => {
+                    let num_values = data_buffer.len() / std::mem::size_of::<u16>();
+                    let values = unsafe {
+                        std::slice::from_raw_parts(data_buffer.as_ptr() as *const u16, num_values)
+                    };
+                    Ok(Arc::new(UInt16Array::from(values.to_vec())) as ArrayRef)
+                }
+                DataType::Int16 => {
+                    let num_values = data_buffer.len() / std::mem::size_of::<i16>();
+                    let values = unsafe {
+                        std::slice::from_raw_parts(data_buffer.as_ptr() as *const i16, num_values)
+                    };
+                    Ok(Arc::new(Int16Array::from(values.to_vec())) as ArrayRef)
+                }
+                DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+                    let num_values = data_buffer.len() / std::mem::size_of::<i64>();
+                    let values = unsafe {
+                        std::slice::from_raw_parts(data_buffer.as_ptr() as *const i64, num_values)
+                    };
+                    Ok(Arc::new(TimestampNanosecondArray::from(values.to_vec())) as ArrayRef)
+                }
+                _ => {
+                    error!(
+                        "Unsupported data type for column '{}': {:?}",
+                        column_name, data_type
+                    );
+                    Err(format!("Unsupported data type: {:?}", data_type))
+                }
+            };
 
-        // Create record batch
-        let batch = RecordBatch::try_new(self.schema.clone(), arrays).unwrap();
-
-        // Get timestamp
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
-        // Store in records
-        let mut records = self.records.lock().unwrap();
-        records.push_back((timestamp, batch));
-        if records.len() > self.max_batches {
-            records.pop_front();
+            match result {
+                Ok(array) => {
+                    arrays.push(array);
+                    valid_fields.push(field.clone());
+                }
+                Err(e) => {
+                    dropped_columns.push(column_name.to_string());
+                    error!("Dropped column '{}' due to error: {}", column_name, e);
+                }
+            }
         }
 
-        // Clear all buffers
-        self.output_buffers
-            .iter()
-            .for_each(|buffer| buffer.lock().unwrap().clear());
+        if arrays.is_empty() {
+            error!("No valid columns to create a record batch. All columns dropped.");
+            return;
+        }
+
+        // Create a schema with only the valid fields
+        let batch_schema = if dropped_columns.is_empty() {
+            self.schema.clone()
+        } else {
+            Arc::new(Schema::new(valid_fields))
+        };
+
+        // Create record batch with error handling
+        match RecordBatch::try_new(batch_schema, arrays) {
+            Ok(batch) => {
+                // Get timestamp
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+
+                // Store in records
+                let mut records = self.records.lock().unwrap();
+                records.push_back((timestamp, batch));
+                if records.len() > self.max_batches {
+                    records.pop_front();
+                }
+
+                // Clear all buffers
+                self.output_buffers
+                    .iter()
+                    .for_each(|buffer| buffer.lock().unwrap().clear());
+            }
+            Err(e) => {
+                error!("Failed to create record batch: {}", e);
+            }
+        }
     }
 
     /// Shuts down the manager, flushing any pending batch.
@@ -1230,6 +1285,28 @@ mod tests {
             .unwrap();
         assert_eq!(real_col.value(0), 2.0);
         assert_eq!(imag_col.value(0), 3.0);
+    }
+
+    #[test]
+    fn test_sanitize_column_name() {
+        // Test the sanitize_column_name function
+        assert_eq!(
+            AccumulatorManager::sanitize_column_name("TEST\x00\x00\x00"),
+            "TEST"
+        );
+        assert_eq!(AccumulatorManager::sanitize_column_name("TEST#1"), "TEST_1");
+        assert_eq!(
+            AccumulatorManager::sanitize_column_name("TEST\nNEW"),
+            "TESTNEW"
+        );
+        assert_eq!(
+            AccumulatorManager::sanitize_column_name("Normal_Name"),
+            "Normal_Name"
+        );
+        assert_eq!(
+            AccumulatorManager::sanitize_column_name("Special@#$%"),
+            "Special____"
+        );
     }
 
     #[test]
