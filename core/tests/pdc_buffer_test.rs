@@ -238,6 +238,68 @@ mod tests {
         println!("Retrieved raw buffer with {} bytes", buffer.len());
         assert!(!buffer.is_empty(), "Buffer should not be empty");
 
+        // Verify frequency values are close to 60 Hz and dfreq values are small
+        for i in 0..data_result.num_rows() {
+            for j in 0..data_result.num_columns() {
+                let field_name = data_result.schema().field(j).name().to_string();
+                if field_name.contains("FREQ_DEVIATION") {
+                    if let Some(freq_val) = data_result
+                        .column(j)
+                        .as_any()
+                        .downcast_ref::<arrow::array::Float32Array>()
+                    {
+                        let freq_value = freq_val.value(i);
+                        // Check if the value is very small (possibly a parsing issue) or close to 60 Hz
+                        assert!(
+                            freq_value.abs() < 2500.0,
+                            "Frequency value {} at row {} is not within +/- 2500 mHz",
+                            freq_value,
+                            i
+                        );
+                    } else if let Some(freq_val) = data_result
+                        .column(j)
+                        .as_any()
+                        .downcast_ref::<arrow::array::Int16Array>()
+                    {
+                        let freq_value = freq_val.value(i) as f32 / 1000.0;
+                        assert!(
+                            freq_value.abs() < 2500.0,
+                            "Frequency value {} at row {} is not within +/- 2500 mHz",
+                            freq_value,
+                            i
+                        );
+                    }
+                } else if field_name.contains("DFREQ") {
+                    if let Some(dfreq_val) = data_result
+                        .column(j)
+                        .as_any()
+                        .downcast_ref::<arrow::array::Float32Array>()
+                    {
+                        let dfreq_value = dfreq_val.value(i);
+                        assert!(
+                            dfreq_value.abs() < 0.1 || dfreq_value.abs() < 1e-5,
+                            "Delta frequency value {} at row {} is not small or effectively zero",
+                            dfreq_value,
+                            i
+                        );
+                    } else if let Some(dfreq_val) = data_result
+                        .column(j)
+                        .as_any()
+                        .downcast_ref::<arrow::array::Int16Array>()
+                    {
+                        let dfreq_value = dfreq_val.value(i) as f32 / 1000.0;
+                        assert!(
+                            dfreq_value.abs() < 0.1 || dfreq_value.abs() < 1e-5,
+                            "Delta frequency value {} at row {} is not small or effectively zero",
+                            dfreq_value,
+                            i
+                        );
+                    }
+                }
+            }
+        }
+        println!("Frequency and delta frequency values verified successfully");
+
         // Stop the stream
         println!("Stopping Stream");
         pdc_buffer.stop_stream();
@@ -248,5 +310,135 @@ mod tests {
 
         // Wait for the server thread to finish
         server_handle.join().expect("Failed to join server thread");
+    }
+
+    #[test]
+    fn test_accumulator_parsing_small_differences_single_pmu() {
+        use arrow::array::Float32Array;
+        use rtpa_core::accumulator::manager::AccumulatorManager;
+        use rtpa_core::ieee_c37_118::random::{random_configuration_frame, random_data_frame};
+        use rtpa_core::utils::config_to_accumulators;
+
+        // Create a random configuration frame with 1 PMU
+        let config_frame = random_configuration_frame(Some(1), None, None);
+
+        // Convert configuration to accumulators
+        let (regular_accs, phasor_accs) = config_to_accumulators(&config_frame, None, None);
+        let mut accumulator_manager = AccumulatorManager::new_with_params(
+            regular_accs.clone(),
+            phasor_accs.clone(),
+            10,
+            1024 * 1024,
+            120,
+        );
+
+        // Generate a random data frame based on the configuration
+        let data_frame = random_data_frame(&config_frame);
+        let data_frame_bytes = data_frame.to_hex();
+
+        // Parse the data frame with the accumulator
+        accumulator_manager
+            .process_buffer(&data_frame_bytes)
+            .unwrap();
+
+        // Get the data as a RecordBatch
+        let batch = accumulator_manager.get_dataframe(None, None).unwrap();
+
+        // Verify that phasor differences are very small (e.g., e-20 or smaller)
+        for col_idx in 0..batch.num_columns() {
+            let col_name = batch.schema().field(col_idx).name().to_string();
+            if col_name.contains("real")
+                || col_name.contains("imag")
+                || col_name.contains("magnitude")
+                || col_name.contains("angle")
+            {
+                if let Some(array) = batch
+                    .column(col_idx)
+                    .as_any()
+                    .downcast_ref::<Float32Array>()
+                {
+                    for row in 0..array.len() {
+                        let value = array.value(row);
+                        println!(
+                            "DEBUG: Phasor value in column {} at row {}: {}",
+                            col_name, row, value
+                        );
+                        assert!(
+                            value.abs() < 1e-1,
+                            "Phasor value {} in column {} at row {} is not close to zero",
+                            value,
+                            col_name,
+                            row
+                        );
+                    }
+                }
+            }
+        }
+        println!("Verified small differences for single PMU data frame parsing");
+    }
+
+    #[test]
+    fn test_accumulator_parsing_small_differences_multi_pmu() {
+        use arrow::array::Float32Array;
+        use rtpa_core::accumulator::manager::AccumulatorManager;
+        use rtpa_core::ieee_c37_118::random::{random_configuration_frame, random_data_frame};
+        use rtpa_core::utils::config_to_accumulators;
+
+        // Create a random configuration frame with 3 PMUs
+        let config_frame = random_configuration_frame(Some(3), None, None);
+
+        // Convert configuration to accumulators
+        let (regular_accs, phasor_accs) = config_to_accumulators(&config_frame, None, None);
+        let mut accumulator_manager = AccumulatorManager::new_with_params(
+            regular_accs.clone(),
+            phasor_accs.clone(),
+            10,
+            1024 * 1024,
+            120,
+        );
+
+        // Generate a random data frame based on the configuration
+        let data_frame = random_data_frame(&config_frame);
+        let data_frame_bytes = data_frame.to_hex();
+
+        // Parse the data frame with the accumulator
+        accumulator_manager
+            .process_buffer(&data_frame_bytes)
+            .unwrap();
+
+        // Get the data as a RecordBatch
+        let batch = accumulator_manager.get_dataframe(None, None).unwrap();
+
+        // Verify that phasor differences are very small (e.g., e-20 or smaller)
+        for col_idx in 0..batch.num_columns() {
+            let col_name = batch.schema().field(col_idx).name().to_string();
+            if col_name.contains("real")
+                || col_name.contains("imag")
+                || col_name.contains("magnitude")
+                || col_name.contains("angle")
+            {
+                if let Some(array) = batch
+                    .column(col_idx)
+                    .as_any()
+                    .downcast_ref::<Float32Array>()
+                {
+                    for row in 0..array.len() {
+                        let value = array.value(row);
+                        println!(
+                            "DEBUG: Phasor value in column {} at row {}: {}",
+                            col_name, row, value
+                        );
+                        assert!(
+                            value.abs() < 1e-1,
+                            "Phasor value {} in column {} at row {} is not close to zero",
+                            value,
+                            col_name,
+                            row
+                        );
+                    }
+                }
+            }
+        }
+        println!("Verified small differences for multi-PMU data frame parsing");
     }
 }

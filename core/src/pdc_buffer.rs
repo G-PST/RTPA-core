@@ -27,7 +27,6 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use arrow::record_batch::RecordBatch;
-use log::{debug, error};
 
 use crate::accumulator::manager::{AccumulatorConfig, AccumulatorManager};
 
@@ -189,6 +188,8 @@ impl PDCBuffer {
 
         // Determine data frame size expected by the configuration frame
         let data_frame_size = config_frame.calc_data_frame_size();
+        println!("Configuration Frame: {:?}", config_frame);
+        println!("Data Frame Size: {}", data_frame_size);
 
         if output_phasor_type.is_none() {
             println!("Using native phasor values. Users will need to utilize scale factors in the
@@ -301,7 +302,7 @@ impl PDCBuffer {
                     }
 
                     if shutdown_rx.try_recv().is_ok() {
-                        println!("Producer shutting down");
+                        log::info!("Producer shutting down");
                         break;
                     }
 
@@ -342,29 +343,26 @@ impl PDCBuffer {
                                             if frame.len() > 1 {
                                                 let sync: u16 =
                                                     u16::from_be_bytes([frame[0], frame[1]]);
-                                                let frame_type = FrameType::from_sync(sync);
-
-                                                match frame_type {
+                                                match FrameType::from_sync(sync) {
                                                     Ok(FrameType::Data) => {
+                                                        log::trace!("Sending data frame of size {} to consumer", frame.len());
                                                         if tx.send(frame.to_vec()).is_err() {
-                                                            println!("Consumer disconnected");
+                                                            log::error!("Consumer disconnected");
                                                             break;
                                                         }
                                                         current_frame_buffer = frame.to_vec();
                                                     }
-                                                    Err(_) => {
-                                                        // Handle invalid frame type
-                                                        // Log error
-                                                        error!(
-                                                            "Error parsing frame type: {:?}",
-                                                            frame_type.err(),
+                                                    Ok(other_type) => {
+                                                        log::debug!(
+                                                            "Ignoring non-data frame: {}",
+                                                            other_type
                                                         );
                                                     }
-                                                    _ => {
-                                                        debug!(
-                                                            "Ignoring Non-Data Frame: {}",
-                                                            frame_type.unwrap()
-                                                        )
+                                                    Err(e) => {
+                                                        log::warn!(
+                                                            "Error parsing frame type: {}",
+                                                            e
+                                                        );
                                                     }
                                                 }
                                             }
@@ -378,22 +376,22 @@ impl PDCBuffer {
                                     }
                                 }
                                 Err(e) => {
-                                    println!("Error finding frame starts: {}", e);
+                                    log::warn!("Error finding frame starts: {}", e);
                                     // If we can't parse frames, treat all as leftover to prevent data loss
                                     leftover_buffer = combined_buffer;
                                 }
                             }
                         }
                         Ok(0) => {
-                            println!("Stream closed by remote end");
+                            log::info!("Stream closed by remote end");
                             break;
                         }
                         Err(e) => {
-                            println!("Stream read error: {}", e);
+                            log::error!("Stream read error: {}", e);
                             break;
                         }
                         Ok(_) => {
-                            println!("Unexpected read result");
+                            log::warn!("Unexpected read result");
                             break;
                         }
                     }
@@ -405,9 +403,13 @@ impl PDCBuffer {
             thread::spawn(move || {
                 while let Ok(frame) = rx.recv() {
                     match validate_checksum(&frame) {
-                        Ok(()) => (),
-                        Err(_) => {
-                            println!("Invalid Checksum, Skipping buffer.")
+                        Ok(()) => {
+                            log::trace!("Frame checksum validated successfully");
+                        }
+                        Err(e) => {
+                            log::warn!("Invalid checksum for frame: {}", e);
+
+                            continue;
                         }
                     }
 
@@ -415,16 +417,19 @@ impl PDCBuffer {
                     let mut manager = match consumer_manager.lock() {
                         Ok(manager) => manager,
                         Err(e) => {
-                            println!("Failed to lock accumulator manager: {:?}", e);
+                            log::error!("Failed to lock accumulator manager: {}", e);
                             continue;
                         }
                     };
 
                     if let Err(e) = manager.process_buffer(&frame) {
-                        println!("Error processing frame: {}", e);
+                        let hex_string: String =
+                            frame.iter().map(|b| format!("{:02x}", b)).collect();
+                        log::error!("Error processing frame: {}", e);
+                        log::error!("Hex representation of frame: {}", hex_string);
                     }
                 }
-                println!("Consumer shutting down");
+                log::info!("Consumer shutting down");
             })
         };
 
