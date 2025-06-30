@@ -25,6 +25,7 @@ use super::config::{ConfigurationFrame, PMUConfigurationFrame};
 use super::data_frame::{DataFrame, PMUData};
 use super::units::{AnalogUnits, MeasurementType, NominalFrequency, PhasorUnits};
 use super::utils::{calculate_crc, now_to_hex};
+use log::debug;
 use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -119,10 +120,6 @@ fn create_random_pmu_config(
         let name = random_channel_name("DG", i as usize);
         chnam.extend_from_slice(&name);
     }
-    println!(
-        "RANDOM:Created Channel Names of total length {}",
-        chnam.len()
-    );
 
     // Generate conversion factors
     let phunit: Vec<PhasorUnits> = vec![
@@ -199,7 +196,7 @@ pub fn random_configuration_frame(
     let version = version.unwrap_or(DEFAULT_VERSION);
     let is_polar = polar.unwrap_or(DEFAULT_POLAR);
 
-    let use_float = true; // Always use float for simplicity
+    let use_float = false; // Always use float for simplicity
 
     // Define frame type based on version
 
@@ -279,7 +276,7 @@ fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
 
     // Create random STAT field (normally would be 0 for good data)
     let raw_stat: u16 = 0; // Using 0 for normal operation
-    let stat = StatField {
+    let mut stat = StatField {
         raw: raw_stat,
         data_error: 0,        // No data error
         pmu_sync: true,       // PMU is synchronized
@@ -291,13 +288,23 @@ fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
         unlock_time: 0,       // Time is locked (using 0 instead of boolean)
         trigger_reason: 0,    // No trigger reason
     };
+    stat.raw = stat.to_raw(Version::V2005);
 
     // Generate phasor data
     let mut phasors = Vec::new();
-    let phasor_size = pmu_config.phasor_size() * pmu_config.phnmr as usize;
-    for _ in 0..phasor_size {
-        phasors.push(4);
+    //let phasor_size = pmu_config.phasor_size() * pmu_config.phnmr as usize;
+
+    for _ in 0..(pmu_config.phnmr - 1) {
+        let random_volt_real: i16 = 14635 + rng.random_range(-100..=100);
+        let random_volt_imag: i16 = 0 + rng.random_range(-100..=100);
+        phasors.extend_from_slice(&random_volt_real.to_be_bytes());
+        phasors.extend_from_slice(&random_volt_imag.to_be_bytes());
     }
+
+    let random_current_real: i16 = 1092 + rng.random_range(-10..=10);
+    let random_current_imag: i16 = 0 + rng.random_range(-10..=10);
+    phasors.extend_from_slice(&random_current_real.to_be_bytes());
+    phasors.extend_from_slice(&random_current_imag.to_be_bytes());
 
     // Generate frequency and dfreq data
     let mut freq = Vec::new();
@@ -306,15 +313,38 @@ fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
 
     if pmu_config.format & 0x0008 != 0 {
         // Float frequency (4 bytes)
-        let freq_val: f32 = 60.0 + rng.random::<f32>() * 0.2 - 0.1; // Around 60 Hz
-        let dfreq_val: f32 = rng.random::<f32>() * 0.1 - 0.05; // Small df/dt
+        let freq_val: f32 = rng.random_range(-2500.0..=2500.0); // Around 60 Hz
+        let dfreq_val: f32 = rng.random::<f32>() * 0.05 - 0.025; // Very small df/dt, between -0.025 and 0.025
+
+        if (freq_val - 60.0).abs() > 0.2 {
+            debug!(
+                "WARNING: Frequency value {} is not close to 60 Hz",
+                freq_val
+            );
+        }
+        if dfreq_val.abs() > 0.05 {
+            debug!(
+                "WARNING: Delta frequency value {} is larger than expected",
+                dfreq_val
+            );
+        }
 
         freq.extend_from_slice(&freq_val.to_be_bytes());
         dfreq.extend_from_slice(&dfreq_val.to_be_bytes());
     } else {
         // Fixed frequency (2 bytes) - scaled value
-        let freq_val: i16 = rng.random::<i16>(); // Random frequency
-        let dfreq_val: i16 = rng.random::<i16>(); // Small df/dt
+
+        let freq_val: i16 = rng.random_range(-2500..=2500); // Fixed at 60 Hz, scaled by 1000 for fixed-point
+        let dfreq_val: i16 = (rng.random::<f32>() * 0.1 - 0.05) as i16; // Small df/dt
+
+        debug!(
+            "RANDOM: Generated fixed-point frequency value: {} (raw)",
+            freq_val
+        );
+        debug!(
+            "RANDOM: Generated fixed-point dfreq value: {} (raw)",
+            dfreq_val
+        );
 
         freq.extend_from_slice(&freq_val.to_be_bytes());
         dfreq.extend_from_slice(&dfreq_val.to_be_bytes());
@@ -322,9 +352,19 @@ fn random_pmu_data(pmu_config: &PMUConfigurationFrame) -> PMUData {
 
     // Generate analog values
     let mut analog = Vec::new();
-    let analog_size = pmu_config.analog_size() * pmu_config.annmr as usize;
-    for _ in 0..analog_size {
-        analog.push(rng.random::<u8>());
+    let analog_size = pmu_config.analog_size();
+    for _ in 0..pmu_config.annmr {
+        match analog_size {
+            2 => {
+                let rand_analog: u16 = rng.random_range(90..=100);
+                analog.extend_from_slice(&rand_analog.to_be_bytes());
+            }
+            4 => {
+                let rand_analog: f32 = rng.random_range(900.0..=1000.0);
+                analog.extend_from_slice(&rand_analog.to_be_bytes());
+            }
+            _ => panic!("Invalid analog size"),
+        }
     }
 
     // Generate digital values
@@ -378,10 +418,10 @@ pub fn random_data_frame(config_frame: &ConfigurationFrame) -> DataFrame {
 
     // Data frame has a different sync word
     let sync = create_sync(config_frame.prefix.version, FrameType::Data);
-
+    let data_frame_size: u16 = config_frame.calc_data_frame_size() as u16;
     let prefix = PrefixFrame {
         sync,
-        framesize: 0, // Will be calculated later
+        framesize: data_frame_size, // Will be calculated later
         idcode: config_frame.prefix.idcode,
         soc,
         leapbyte: 0,
@@ -393,7 +433,8 @@ pub fn random_data_frame(config_frame: &ConfigurationFrame) -> DataFrame {
     let mut pmu_data = Vec::new();
 
     for pmu_config in &config_frame.pmu_configs {
-        pmu_data.push(random_pmu_data(pmu_config));
+        let rand_pmu_data = random_pmu_data(pmu_config);
+        pmu_data.push(rand_pmu_data);
     }
 
     // Create the data frame
@@ -404,8 +445,17 @@ pub fn random_data_frame(config_frame: &ConfigurationFrame) -> DataFrame {
     };
 
     // Calculate the framesize using to_hex()
-    let frame_bytes = data_frame.to_hex();
-    data_frame.prefix.framesize = frame_bytes.len() as u16;
+    let data_frame_bytes = data_frame.to_hex();
+    data_frame.chk = calculate_crc(&data_frame_bytes[..data_frame_bytes.len() - 2]);
+
+    let parsed_data_frame = DataFrame::from_hex(&data_frame_bytes, &config_frame).unwrap();
+
+    assert_eq!(
+        data_frame.prefix.framesize,
+        parsed_data_frame.prefix.framesize
+    );
+    assert_eq!(parsed_data_frame, data_frame);
+    data_frame.prefix.framesize = data_frame_bytes.len() as u16;
 
     // Generate the frame bytes again with the correct framesize
     let frame_bytes = data_frame.to_hex();
@@ -468,5 +518,30 @@ mod tests {
 
         // Verify the actual size matches the expected size
         assert_eq!(bytes.len(), data_frame.prefix.framesize as usize);
+    }
+
+    #[test]
+    fn test_random_multipmu_data_frame() {
+        // Create a random configuration frame
+        let config_frame = random_configuration_frame(Some(2), None, None);
+
+        // Create a random data frame based on the configuration
+        let data_frame = random_data_frame(&config_frame);
+
+        // Verify the data frame has the same number of PMUs as the config frame
+        assert_eq!(data_frame.pmu_data.len(), config_frame.pmu_configs.len());
+
+        // Verify the data frame can be converted to bytes
+        let bytes = data_frame.to_hex();
+        assert!(!bytes.is_empty());
+
+        let new_data_frame = DataFrame::from_hex(&bytes, &config_frame).unwrap();
+        let new_bytes = new_data_frame.to_hex();
+
+        assert_eq!(bytes.len(), new_bytes.len());
+        // Verify the actual size matches the expected size
+        assert_eq!(bytes.len(), data_frame.prefix.framesize as usize);
+
+        assert_eq!(data_frame, new_data_frame);
     }
 }

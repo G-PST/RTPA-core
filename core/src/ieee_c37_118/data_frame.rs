@@ -24,7 +24,6 @@
 use super::common::{ChannelDataType, ParseError, PrefixFrame, StatField};
 use super::config::ConfigurationFrame;
 use super::utils::{calculate_crc, validate_checksum};
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -39,7 +38,7 @@ use std::collections::HashMap;
 /// * `prefix`: Common frame prefix (SYNC, frame size, ID code, timestamp).
 /// * `pmu_data`: Vector of PMU data sections.
 /// * `chk`: CRC-CCITT checksum for frame validation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DataFrame {
     pub prefix: PrefixFrame,
     pub pmu_data: Vec<PMUData>,
@@ -59,7 +58,7 @@ pub struct DataFrame {
 /// * `dfreq`: Raw bytes for frequency deviation value.
 /// * `analog`: Raw bytes for analog measurements.
 /// * `digital`: Raw bytes for digital status words.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PMUData {
     pub stat: StatField,
     pub phasors: Vec<u8>, // Raw bytes for phasor values
@@ -130,6 +129,7 @@ impl DataFrame {
 
             // Phasor values
             let phasor_size = pmu_config.phasor_size() * pmu_config.phnmr as usize;
+
             if offset + phasor_size > bytes.len() - 2 {
                 return Err(ParseError::InvalidLength {
                     message: format!(
@@ -252,6 +252,10 @@ impl DataFrame {
         // Add checksum
         let calculated_crc = calculate_crc(&result);
         result.extend_from_slice(&calculated_crc.to_be_bytes());
+
+        if result.len() != self.prefix.framesize as usize {
+            panic!("DATA FRAME: Invalid frame size");
+        }
 
         result
     }

@@ -69,7 +69,8 @@ pub fn config_to_accumulators(
     let mut phasor_accumulators: Vec<PhasorAccumulatorConfig> = vec![];
 
     // Process each PMU configuration
-    let mut current_offset = 14 + 2; // Prefix + STAT
+
+    let mut current_offset = 14; // Prefix + STAT
 
     match output_phasor_type {
         Some(value) => println!("Converting phasor data to: {}", value),
@@ -89,7 +90,9 @@ pub fn config_to_accumulators(
     for pmu_config in pmu_configs {
         let station_name = String::from_utf8_lossy(&pmu_config.stn).trim().to_string();
 
-        // Process phasors
+        // TODO: Process STAT field.
+        current_offset += 2; // skipping stat field.
+
         if pmu_config.phnmr > 0 {
             let column_names = pmu_config.get_column_names();
             let phasor_column_names = column_names.iter().take(pmu_config.phnmr as usize);
@@ -176,6 +179,7 @@ pub fn config_to_accumulators(
                 station_name, pmu_config.idcode
             ),
         });
+
         current_offset += freq_size;
 
         // Process ROCOF (dfreq)
@@ -186,6 +190,7 @@ pub fn config_to_accumulators(
             scale_factor: 1,
             name: format!("{}_{}_DFREQ (ROCOF)", station_name, pmu_config.idcode),
         });
+
         current_offset += freq_size;
 
         // Process analog values

@@ -316,7 +316,11 @@ impl ConfigurationFrame {
             });
         }
 
-        validate_checksum(bytes).unwrap();
+        if validate_checksum(bytes).is_err() {
+            return Err(ParseError::InvalidChecksum {
+                message: format!("ConfigurationFrame: Checksum validation failed",),
+            });
+        }
 
         let mut offset = 14;
         let time_base = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap());

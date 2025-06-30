@@ -337,7 +337,7 @@ pub struct ChannelInfo {
 /// * `leapbyte`: Time quality and leap second flags.
 /// * `fracsec`: Fractional second timestamp.
 /// * `version`: Derived IEEE C37.118 version (not serialized).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PrefixFrame {
     pub sync: u16, // SYNC field: frame type (bits 6-4), version (bits 3-0)
     pub framesize: u16,
@@ -445,7 +445,7 @@ impl PrefixFrame {
 /// * `time_quality`: Time quality code (3-bit in 2011/2024, 2-bit in 2005).
 /// * `unlock_time`: Unlock time code (2011/2024 only).
 /// * `trigger_reason`: 4-bit trigger reason code.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatField {
     pub raw: u16,            // Raw STAT value
     pub data_error: u8,      // 2-bit field (all versions)
